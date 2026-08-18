@@ -351,3 +351,86 @@ test("parseThemeColor: reads a key from Omarchy's colors.toml", () => {
   assert.equal(Model.parseThemeColor("", "green"), "")
   assert.equal(Model.parseThemeColor(null, "green"), "")
 })
+
+// ---- Revision 3: display currency
+
+test("normalizeCurrency / normalizeCurrencies", () => {
+  assert.equal(Model.normalizeCurrency(" eur "), "EUR")
+  assert.equal(Model.normalizeCurrency("USD"), "USD")
+  assert.equal(Model.normalizeCurrency("euro"), "")
+  assert.equal(Model.normalizeCurrency(""), "")
+  assert.equal(Model.normalizeCurrency(null), "")
+  assert.deepEqual(Model.normalizeCurrencies(null), ["USD", "EUR", "GBP", "JPY", "CHF"])
+  assert.deepEqual(Model.normalizeCurrencies(["eur", "usd", "EUR", "x"]), ["EUR", "USD"])
+  assert.deepEqual(Model.normalizeCurrencies("gbp, jpy"), ["GBP", "JPY"])
+  assert.deepEqual(Model.normalizeCurrencies([]), ["USD", "EUR", "GBP", "JPY", "CHF"])
+})
+
+test("currencyCycle: '' (native) sits before the list and wraps both ways", () => {
+  const list = ["USD", "EUR"]
+  assert.equal(Model.currencyCycle("", list, 1), "USD")
+  assert.equal(Model.currencyCycle("USD", list, 1), "EUR")
+  assert.equal(Model.currencyCycle("EUR", list, 1), "")
+  assert.equal(Model.currencyCycle("", list, -1), "EUR")
+  assert.equal(Model.currencyCycle("USD", list, -1), "")
+  assert.equal(Model.currencyCycle("XXX", list, 1), "USD")   // unknown current -> first
+  assert.equal(Model.currencyCycle("", [], 1), "")
+})
+
+test("quoteCurrency: minor units (GBp, ZAc) map to the major code with a factor", () => {
+  assert.deepEqual(Model.quoteCurrency("USD"), { code: "USD", factor: 1 })
+  assert.deepEqual(Model.quoteCurrency("GBp"), { code: "GBP", factor: 0.01 })
+  assert.deepEqual(Model.quoteCurrency("ZAc"), { code: "ZAR", factor: 0.01 })
+  assert.deepEqual(Model.quoteCurrency(""), { code: "", factor: 1 })
+})
+
+test("ratePairs: one Yahoo FX symbol per distinct quote currency that differs from the display one", () => {
+  const list = [quote("AAPL", 1, 1), quote("SAP.DE", 2, 2), quote("VOD.L", 3, 3), quote("BAD", null, null, "Not Found")]
+  list[0].currency = "USD"; list[1].currency = "EUR"; list[2].currency = "GBp"; list[3].currency = "USD"
+  assert.deepEqual(Model.ratePairs(list, "EUR"), ["USDEUR=X", "GBPEUR=X"])
+  assert.deepEqual(Model.ratePairs(list, "USD"), ["EURUSD=X", "GBPUSD=X"])
+  assert.deepEqual(Model.ratePairs(list, ""), [])
+  assert.deepEqual(Model.ratePairs([], "EUR"), [])
+})
+
+const RATE_LINE = JSON.stringify({ chart: { result: [{ meta: { currency: "EUR", symbol: "USDEUR=X", regularMarketPrice: 0.92, chartPreviousClose: 0.91 } }], error: null } })
+
+test("parseRateLines / rateFor", () => {
+  const rates = Model.parseRateLines(RATE_LINE + "\n" + NOT_FOUND_LINE + "\n", ["USDEUR=X", "XXXEUR=X"])
+  assert.deepEqual(rates, { "USDEUR=X": 0.92 })
+  assert.equal(Model.rateFor("USD", "EUR", rates), 0.92)
+  assert.equal(Model.rateFor("EUR", "EUR", rates), 1)
+  assert.equal(Model.rateFor("USD", "", rates), 1)
+  assert.equal(Model.rateFor("GBp", "EUR", { "GBPEUR=X": 1.2 }), 0.012)
+  assert.equal(Model.rateFor("USD", "JPY", rates), null)
+  assert.equal(Model.rateFor("", "EUR", rates), null)
+})
+
+test("convertQuote: scales money fields and series, keeps percentages, tags the display currency", () => {
+  const q = quote("AAPL", 305.59, 305.93)
+  q.currency = "USD"; q.dayLow = 302.94; q.dayHigh = 307.66; q.week52Low = 223.78; q.week52High = 344.57; q.open = 306.21
+  q.series = [{ t: 1, c: 300 }, { t: 2, c: 310 }]
+  const c = Model.convertQuote(q, "EUR", { "USDEUR=X": 0.5 })
+  assert.equal(c.price, 152.795)
+  assert.equal(c.prevClose, 152.965)
+  assert.ok(Math.abs(c.change - (152.795 - 152.965)) < 1e-9)
+  assert.equal(c.changePct, q.changePct)
+  assert.equal(c.dayLow, 151.47)
+  assert.equal(c.week52High, 172.285)
+  assert.equal(c.open, 153.105)
+  assert.deepEqual(c.series, [{ t: 1, c: 150 }, { t: 2, c: 155 }])
+  assert.equal(c.currency, "EUR")
+  assert.equal(c.nativeCurrency, "USD")
+  assert.equal(c.converted, true)
+  assert.equal(q.price, 305.59)                       // original untouched
+  const same = Model.convertQuote(q, "USD", {})
+  assert.equal(same.converted, false)
+  assert.equal(same.price, 305.59)
+  const missing = Model.convertQuote(q, "JPY", {})
+  assert.equal(missing.converted, false)
+  assert.equal(missing.price, 305.59)
+  assert.equal(Model.convertQuote(quote("BAD", null, null, "Not Found"), "EUR", {}).error, "Not Found")
+  assert.deepEqual(Model.convertSeries([{ t: 1, c: 2 }], 3), [{ t: 1, c: 6 }])
+  assert.deepEqual(Model.convertSeries([{ t: 1, c: 2 }], null), [{ t: 1, c: 2 }])
+  assert.equal(Model.convertAll([q], "EUR", { "USDEUR=X": 0.5 })[0].price, 152.795)
+})

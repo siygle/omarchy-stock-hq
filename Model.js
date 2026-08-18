@@ -465,6 +465,141 @@ function formatVolume(value) {
   return String(Math.round(n))
 }
 
+// ---- Display currency. Yahoo serves FX pairs through the same chart
+//      endpoint ("USDEUR=X" -> 1 USD in EUR), so every quote can be shown in
+//      one chosen currency without another data source.
+
+var DEFAULT_CURRENCIES = ["USD", "EUR", "GBP", "JPY", "CHF"]
+
+function normalizeCurrency(value) {
+  var s = trimString(value).toUpperCase()
+  return /^[A-Z]{3}$/.test(s) ? s : ""
+}
+
+function normalizeCurrencies(value, fallback) {
+  var defaults = fallback || DEFAULT_CURRENCIES
+  var list = []
+  if (Array.isArray(value)) list = value
+  else if (typeof value === "string") list = value.split(/[\s,;]+/)
+  else if (value && typeof value === "object" && typeof value.length === "number") {
+    for (var k = 0; k < value.length; k++) list.push(value[k])
+  }
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var code = normalizeCurrency(list[i])
+    if (code === "" || out.indexOf(code) !== -1) continue
+    out.push(code)
+  }
+  return out.length ? out : defaults.slice()
+}
+
+// Cycle "" (native, each quote in its own currency) -> list[0] -> ... -> "".
+function currencyCycle(current, list, step) {
+  var ring = [""].concat(list || [])
+  var idx = ring.indexOf(normalizeCurrency(current))
+  if (idx === -1) idx = 0
+  var dir = step < 0 ? -1 : 1
+  return ring[(((idx + dir) % ring.length) + ring.length) % ring.length]
+}
+
+// Yahoo reports some markets in minor units: London in pence ("GBp"/"GBX"),
+// Johannesburg in cents ("ZAc"), Tel Aviv in agorot ("ILA"). Map those to the
+// major code plus a factor.
+var MINOR_UNITS = { "GBp": "GBP", "GBX": "GBP", "ZAc": "ZAR", "ILA": "ILS" }
+
+function quoteCurrency(currency) {
+  var raw = trimString(currency)
+  if (raw === "") return { code: "", factor: 1 }
+  if (MINOR_UNITS[raw]) return { code: MINOR_UNITS[raw], factor: 0.01 }
+  return { code: raw.toUpperCase(), factor: 1 }
+}
+
+function ratePairs(quotes, display) {
+  var target = normalizeCurrency(display)
+  if (target === "") return []
+  var list = quotes || []
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    if (!isValid(list[i])) continue
+    var from = quoteCurrency(list[i].currency).code
+    if (from === "" || from === target) continue
+    var pair = from + target + "=X"
+    if (out.indexOf(pair) === -1) out.push(pair)
+  }
+  return out
+}
+
+function parseRateLines(text, pairs) {
+  var quotes = parseQuoteLines(text, pairs)
+  var out = {}
+  for (var i = 0; i < quotes.length; i++) {
+    if (isValid(quotes[i])) out[quotes[i].symbol] = quotes[i].price
+  }
+  return out
+}
+
+// Multiplier turning a price in `currency` into `display`; 1 when no
+// conversion applies, null when the needed rate is not (yet) known.
+function rateFor(currency, display, rates) {
+  var target = normalizeCurrency(display)
+  var from = quoteCurrency(currency)
+  if (target === "") return 1
+  if (from.code === "") return null
+  if (from.code === target) return from.factor
+  var rate = rates ? toNumber(rates[from.code + target + "=X"]) : null
+  return rate === null ? null : rate * from.factor
+}
+
+function convertSeries(series, rate) {
+  var list = series || []
+  var r = toNumber(rate)
+  if (r === null || r === 1) return list
+  var out = []
+  for (var i = 0; i < list.length; i++) out.push({ t: list[i].t, c: list[i].c * r })
+  return out
+}
+
+function scaled(value, rate) {
+  var n = toNumber(value)
+  return n === null ? null : n * rate
+}
+
+// Copy of `quote` with money fields and series in `display`. Percentages are
+// currency-independent. Falls back to the untouched quote (converted: false)
+// when the rate is unknown or no conversion applies.
+function convertQuote(quote, display, rates) {
+  if (!quote) return quote
+  var out = {}
+  for (var key in quote) out[key] = quote[key]
+  out.nativeCurrency = quote.currency
+  out.converted = false
+  if (!isValid(quote)) return out
+  var target = normalizeCurrency(display)
+  var from = quoteCurrency(quote.currency)
+  if (target === "" || from.code === target || from.code === "") return out
+  var rate = rateFor(quote.currency, display, rates)
+  if (rate === null) return out
+  out.price = scaled(quote.price, rate)
+  out.prevClose = scaled(quote.prevClose, rate)
+  out.change = out.price !== null && out.prevClose !== null ? out.price - out.prevClose : null
+  out.dayLow = scaled(quote.dayLow, rate)
+  out.dayHigh = scaled(quote.dayHigh, rate)
+  out.week52Low = scaled(quote.week52Low, rate)
+  out.week52High = scaled(quote.week52High, rate)
+  out.open = scaled(quote.open, rate)
+  out.series = convertSeries(quote.series, rate)
+  out.currency = target
+  out.converted = true
+  return out
+}
+
+function convertAll(quotes, display, rates) {
+  var list = quotes || []
+  var out = []
+  for (var i = 0; i < list.length; i++) out.push(convertQuote(list[i], display, rates))
+  return out
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     DEFAULT_SYMBOLS: DEFAULT_SYMBOLS,
@@ -503,6 +638,17 @@ if (typeof module !== "undefined") {
     tapeItems: tapeItems,
     normalizeColor: normalizeColor,
     parseThemeColor: parseThemeColor,
-    formatVolume: formatVolume
+    formatVolume: formatVolume,
+    DEFAULT_CURRENCIES: DEFAULT_CURRENCIES,
+    normalizeCurrency: normalizeCurrency,
+    normalizeCurrencies: normalizeCurrencies,
+    currencyCycle: currencyCycle,
+    quoteCurrency: quoteCurrency,
+    ratePairs: ratePairs,
+    parseRateLines: parseRateLines,
+    rateFor: rateFor,
+    convertSeries: convertSeries,
+    convertQuote: convertQuote,
+    convertAll: convertAll
   }
 }
