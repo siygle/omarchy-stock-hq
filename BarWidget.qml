@@ -14,8 +14,8 @@ BarWidget {
   moduleName: "io.github.al1gat0r.stocks"
 
   // ---- Settings (inline on this widget's shell.json entry).
-  readonly property int tickerWidth: Model.tickerWidth(setting("tickerWidth", 360))
-  readonly property real scrollSpeed: Model.scrollSpeed(setting("scrollSpeed", 40))
+  readonly property int tickerWidth: Model.tickerWidth(setting("tickerWidth", 180))
+  readonly property real scrollSpeed: Model.scrollSpeed(setting("scrollSpeed", 20))
 
   property bool pausedByUser: false
 
@@ -61,6 +61,8 @@ BarWidget {
   }
 
   readonly property var tapeItems: panelLoader.item ? panelLoader.item.tapeItems : []
+  readonly property color upColor: panelLoader.item ? panelLoader.item.upColor : button.foreground
+  readonly property color downColor: panelLoader.item ? panelLoader.item.downColor : button.activeColor
   readonly property bool hasTape: !root.vertical && tapeItems.length > 0
   // What the plain label shows when the tape has nothing: stacked SYM/arrow
   // on vertical bars, "AAPL …" / "AAPL !" otherwise.
@@ -95,6 +97,34 @@ BarWidget {
     function show(): void { root.open() }
     function hide(): void { root.close() }
     function toggle(): void { root.togglePanel() }
+  }
+
+  // One pass over every item: colored quote text, neutral separator.
+  component TapeRun: Row {
+    spacing: 0
+    Repeater {
+      model: root.tapeItems
+
+      Row {
+        required property var modelData
+        spacing: 0
+
+        Text {
+          text: modelData.text
+          color: modelData.down ? root.downColor : (modelData.up ? root.upColor : button.foreground)
+          font.family: button.fontFamily
+          font.pixelSize: button.fontSize
+          renderType: Text.NativeRendering
+        }
+        Text {
+          text: tape.separator
+          color: Qt.darker(button.foreground, 1.6)
+          font.family: button.fontFamily
+          font.pixelSize: button.fontSize
+          renderType: Text.NativeRendering
+        }
+      }
+    }
   }
 
   WidgetButton {
@@ -133,19 +163,9 @@ BarWidget {
       property real offset: 0
 
       // Invisible single run used only to measure one loop's width.
-      Row {
+      TapeRun {
         id: measure
         visible: false
-        spacing: 0
-        Repeater {
-          model: root.tapeItems
-          Text {
-            required property var modelData
-            text: modelData.text + tape.separator
-            font.family: button.fontFamily
-            font.pixelSize: button.fontSize
-          }
-        }
       }
 
       Row {
@@ -156,22 +176,7 @@ BarWidget {
 
         Repeater {
           model: tape.copies
-
-          Row {
-            spacing: 0
-            Repeater {
-              model: root.tapeItems
-
-              Text {
-                required property var modelData
-                text: modelData.text + tape.separator
-                color: modelData.down ? button.activeColor : button.foreground
-                font.family: button.fontFamily
-                font.pixelSize: button.fontSize
-                renderType: Text.NativeRendering
-              }
-            }
-          }
+          TapeRun {}
         }
       }
 
