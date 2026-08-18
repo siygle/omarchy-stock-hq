@@ -194,3 +194,86 @@ scroll wheel → step to the next/previous valid symbol (restarting the cycle ti
 
 Sparkline/price history, Finnhub or other providers, `allowMultiple` instances,
 pre/post-market prices, per-symbol alerts, currency conversion.
+
+---
+
+## Revision 2 (2026-08-18) — ticker tape + charts
+
+Requested after the v1 pill was built: the bar shows a **horizontally scrolling
+ticker tape** instead of a cycling pill, and the panel shows **charts and more
+details**. Sections above remain valid except where this revision overrides them.
+
+### Bar (replaces "BarWidget.qml" section)
+
+`WidgetButton` container (keeps bar hover/tooltip/click registration) with the
+label hidden and a clipped tape viewport inside:
+
+- Fixed width `tickerWidth` px (setting, default `360`, min `80`).
+- Content: every valid quote as `SYM price ▲pct` (`compact` drops the price),
+  separated by ` • `; items whose day change is negative use the bar's urgent
+  color, others the bar foreground. Invalid symbols are omitted from the tape
+  (still listed in the panel).
+- Scrolls right-to-left at `scrollSpeed` px/s (setting, default `40`; `0` =
+  static). The run is repeated enough times to cover the viewport plus one run
+  and animated over exactly one run width, so the loop is seamless.
+- Hover pauses; right-click toggles pause; left-click toggles the panel;
+  middle-click refreshes. Wheel does nothing.
+- Vertical bars show a static `SYM\n▲` for the first valid symbol.
+- While loading / when nothing is valid the label falls back to `AAPL …` /
+  `AAPL !` (v1 behavior).
+- IPC target `io.github.al1gat0r.stocks`: `open close show hide toggle refresh pause`.
+- `cycleSeconds` setting is removed. `cycleIndex` becomes the panel's
+  `selectedIndex`.
+
+### Data (extends "Data source")
+
+- Quote fetch (periodic, one curl): `range=1d&interval=5m` per symbol. Meta
+  gives price/day change (`previousClose`, falling back to
+  `chartPreviousClose`), `regularMarketVolume`; `timestamp[]` +
+  `indicators.quote[0].close[]` give the intraday series (nulls skipped);
+  `indicators.quote[0].open[]` first non-null gives the day's open.
+- Chart fetch (on demand, second curl): `range=<r>&interval=<i>` with
+  `1d→5m, 5d→15m, 1mo→1d, 6mo→1d, 1y→1wk`, for all symbols, when the panel's
+  active range is not `1d`. Only the series is used from these responses
+  (`chartPreviousClose` there is the close before the range start, not the
+  previous session). Cached until the next quote refresh or range change.
+- New setting `chartRange` (default `1d`, one of `1d 5d 1mo 6mo 1y`); the
+  panel's range chips persist their choice into the entry via
+  `bar.shell.updateEntryInline` (as `omarchy.clock` does for `format`).
+
+### Panel (replaces the "Panel UI" bullet)
+
+Width `Style.space(440)`. Top to bottom:
+
+1. Header: `Stocks` · range chips `1D 5D 1M 6M 1Y` (selected chip filled) · `Updated HH:mm`.
+2. Rows, one per symbol: `SYM` · name (elided) · sparkline (Canvas 72×20,
+   colored by direction over the active range) · price · day change (urgent
+   when negative). Clicking selects the row (highlighted); invalid symbols
+   show their error muted, no sparkline.
+3. Detail block for the selected valid symbol: name + `exchange · currency`;
+   big price + change; chart (Canvas, full width × `Style.space(120)`: line,
+   soft gradient fill, min/max labels, dashed previous-close line on `1d`
+   when inside the bounds, first/last time labels); stats grid: Prev close,
+   Open, Day range, 52w range, Volume (`32.7M`), Last trade (`ddd HH:mm`);
+   `Open on Yahoo Finance ↗` link (xdg-open).
+4. Footer: fetch error (urgent) or hint.
+
+### Model.js additions
+
+```
+CHART_RANGES = ["1d","5d","1mo","6mo","1y"]
+chartRange(value, fallback="1d")          -> validated lower-case range
+chartInterval(range)                      -> "5m"|"15m"|"1d"|"1wk"
+chartUrl(symbol, range="1d")              -> URL with matching interval
+curlCommand(symbols, ua, range="1d")
+tickerWidth(value, fallback=360)          -> int >= 80
+scrollSpeed(value, fallback=40)           -> number >= 0
+parseChartResponse(line)                  -> Quote + { series: [{t,c}], open, volume }
+parseSeriesLines(text, symbols)           -> { SYM: series }
+seriesBounds(series)                      -> {min,max} | null
+seriesDirection(series)                   -> last.c - first.c (0 when < 2 points)
+seriesPoints(series, w, h, pad)           -> [{x,y}] time-proportional x, value-scaled y
+valueToY(value, bounds, h, pad)           -> y | null when outside bounds
+tapeItems(quotes, compact)                -> [{symbol, text, down}] valid quotes only
+formatVolume(n)                           -> "950" | "114.9K" | "32.7M" | "1.2B" | ""
+```

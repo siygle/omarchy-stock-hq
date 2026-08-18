@@ -1474,3 +1474,36 @@ Expected: installed version `0.1.0`, enabled.
 - **Spec coverage:** settings (T1), data source + parsing (T2), formatting/cycling (T3), Panel state machine + UI + error table (T4), BarWidget contract/input/IPC/urgent color (T5), install/verify/settings round-trip/preview (T6), README/LICENSE (T7). Vertical-bar label is covered by `verticalLabel` (T3) and `pillText` (T5).
 - **Placeholders:** none; every step has concrete code or commands.
 - **Type consistency:** `stepSymbol(direction)` (Panel) ↔ `nextSymbol()/prevSymbol()` (BarWidget) ↔ `Model.nextIndex(current, quotes, step)`; `label`/`verticalText`/`currentIsDown` names identical in T4 and T5; `Model.emptyQuote` exported in T2 and used by T3's tests.
+
+---
+
+## Revision 2 — ticker tape + charts (supersedes Tasks 5–7 where they overlap)
+
+Approved mid-execution after Task 5. Tasks 1–5 stand (their code is reused);
+Task 6/7 are re-run after the tasks below. Implementation code for these tasks
+lives in the corresponding commits on `feat/stocks-widget` (the executor is the
+plan author, working inline); each task still lists files, interfaces, tests
+and verification.
+
+### Task 8: Model.js — ranges, series, tape, chart geometry (TDD)
+- Modify `Model.js`, `test/model.test.js`.
+- Add the functions listed under "Model.js additions" in the spec's Revision 2.
+- `chartUrl("AAPL")` now yields `?range=1d&interval=5m` (update the Task 2 test).
+- Tests: range validation; interval mapping; url per range; tickerWidth/scrollSpeed clamps; series parsing skips nulls and reads open/volume; `parseSeriesLines`; bounds/direction/points on a 3-point series (exact x/y); `valueToY` inside/outside; `tapeItems` skips invalid + compact form + down flag; `formatVolume` thresholds.
+- Verify: `node --test test/model.test.js` all green. Commit.
+
+### Task 9: Panel.qml v2 — range chips, sparklines, detail block, chart fetch
+- Rewrite the UI section of `Panel.qml`; keep the fetch/retry state machine.
+- New state: `selectedIndex`, `activeRange`, `chartSeries` (map), `chartLoading`; `chartProc` (second `Process`); `seriesFor(symbol)`; `selectRange(range)` persists via `bar.shell.updateEntryInline`.
+- Exposes to BarWidget: `label`, `verticalText`, `tapeItems` (array), `opened`, `open/close/toggle/closeForPopoutSwitch`, `refresh()`.
+- Verify: `qmllint -I /usr/share/omarchy/shell Panel.qml` exit 0. Commit.
+
+### Task 10: BarWidget.qml v2 — scrolling tape
+- Replace the pill with the tape viewport inside `WidgetButton` (label hidden unless vertical/fallback); `tickerWidth`, `scrollSpeed`, `compact` read via `setting()`; hover/right-click pause; IPC `pause`.
+- Verify: renamed-copy lint of the file minus the IpcHandler block exits 0; `omarchy plugin validate` exit 0. Commit.
+
+### Task 11: Live install + verification (re-run of Task 6 with v2 checks)
+- Sync the installed clone (`git -C ~/.config/omarchy/plugins/io.github.al1gat0r.stocks pull`), `omarchy-shell shell rescanPlugins`, `omarchy plugin enable io.github.al1gat0r.stocks`.
+- Screenshot the tape and the open panel; exercise `omarchy-shell shell summon/hide`, `omarchy-shell io.github.al1gat0r.stocks refresh|pause`, range chip click via `omarchy bar set … chartRange 1mo`, symbols round-trip incl. a bad symbol; check `qs log` for plugin errors. Save `preview.png`. Commit.
+
+### Task 12: README/LICENSE (re-run of Task 7 with v2 settings table: `symbols`, `refreshMinutes`, `compact`, `tickerWidth`, `scrollSpeed`, `chartRange`) and merge to `main`.
