@@ -1507,3 +1507,10 @@ and verification.
 - Screenshot the tape and the open panel; exercise `omarchy-shell shell summon/hide`, `omarchy-shell io.github.al1gat0r.stocks refresh|pause`, range chip click via `omarchy bar set … chartRange 1mo`, symbols round-trip incl. a bad symbol; check `qs log` for plugin errors. Save `preview.png`. Commit.
 
 ### Task 12: README/LICENSE (re-run of Task 7 with v2 settings table: `symbols`, `refreshMinutes`, `compact`, `tickerWidth`, `scrollSpeed`, `chartRange`) and merge to `main`.
+
+## Revision 3 — colors, size, currency (executed inline)
+- Task 13: Model — `normalizeColor`, `parseThemeColor`, `isUp`, tape `up` flag, defaults 180/20 (tests updated). Commit `7ee0e3f`.
+- Task 14: Panel/BarWidget — theme colors via `FileView` on `colors.toml`, `trendColor`/`directionColor`, `TapeRun` component with neutral separators, panel width 500. Commit `8f5ac72`.
+- Task 15: Model — currency helpers (`normalizeCurrency`, `normalizeCurrencies`, `currencyCycle`, `quoteCurrency`, `ratePairs`, `parseRateLines`, `rateFor`, `convertSeries`, `convertQuote`, `convertAll`) with tests. Commit `9f29b56`.
+- Task 16: Panel — `shownQuotes`, rates `Process` + retry, currency chip, `selectCurrency` persistence, converted chart series. Commit `58067a1`.
+- Verification (live, after `omarchy restart shell`): tape 180 px, green/red items, `Native ⇄` → 305.59 and `GBP ⇄` → 225.92 with the tape following; panel stays open ≥ 9 s after summon; range chips switch in place.

@@ -277,3 +277,24 @@ valueToY(value, bounds, h, pad)           -> y | null when outside bounds
 tapeItems(quotes, compact)                -> [{symbol, text, down}] valid quotes only
 formatVolume(n)                           -> "950" | "114.9K" | "32.7M" | "1.2B" | ""
 ```
+
+---
+
+## Revision 3 (2026-08-18) — colors, size, currency
+
+- Tape items and panel numbers use the theme palette: up → `green`, down →
+  `red` from `~/.local/state/omarchy/current/theme/colors.toml` (watched, so
+  theme switches follow); fallbacks `#5fbf6f` / bar urgent. Settings
+  `upColor` / `downColor` (hex) override. Separators are neutral (muted).
+- New defaults: `tickerWidth` 180 (was 360), `scrollSpeed` 20 px/s (was 40).
+- Display currency: setting `currency` (`""` = native), cycle list
+  `currencies` (default `USD EUR GBP JPY CHF`). Header chip `USD ⇄`
+  (left-click next, right-click previous, persisted like `chartRange`). Rates
+  come from Yahoo FX pairs (`<FROM><TO>=X`, one per distinct quote currency),
+  fetched with every quote refresh and on currency change, retried 3× on
+  failure. Every money field and series is converted (percentages are not);
+  minor-unit quotes (`GBp`, `GBX`, `ZAc`, `ILA`) are scaled ÷100 first. The
+  detail line shows `USD → EUR` when converted.
+- Finding: this Quickshell build has no `Qt.clearComponentCache`, so the
+  shell's plugin hot-reload cannot evict already-loaded QML — a shell restart
+  is required after edits (documented in the README's Develop section).
