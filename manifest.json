@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.al1gat0r.stocks",
+  "name": "Stocks",
+  "version": "0.1.0",
+  "author": "al1gat0r",
+  "license": "MIT",
+  "description": "Stock ticker pill with a quotes panel for the Omarchy bar (Yahoo Finance, no API key).",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Stocks",
+    "description": "Cycling stock ticker with a quotes panel",
+    "category": "Info",
+    "allowMultiple": false,
+    "defaultSection": "center"
+  }
+}
