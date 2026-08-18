@@ -241,13 +241,13 @@ test("tickerWidth / scrollSpeed clamps", () => {
   assert.equal(Model.tickerWidth(500), 500)
   assert.equal(Model.tickerWidth("240"), 240)
   assert.equal(Model.tickerWidth(10), 80)
-  assert.equal(Model.tickerWidth("x"), 360)
+  assert.equal(Model.tickerWidth("x"), 180)
   assert.equal(Model.tickerWidth(undefined, 300), 300)
   assert.equal(Model.scrollSpeed(60), 60)
   assert.equal(Model.scrollSpeed("12.5"), 12.5)
   assert.equal(Model.scrollSpeed(0), 0)
-  assert.equal(Model.scrollSpeed(-3), 40)
-  assert.equal(Model.scrollSpeed("fast"), 40)
+  assert.equal(Model.scrollSpeed(-3), 20)
+  assert.equal(Model.scrollSpeed("fast"), 20)
   assert.equal(Model.scrollSpeed(null, 25), 25)
 })
 
@@ -313,9 +313,10 @@ test("valueToY: inside the bounds maps like seriesPoints, outside is null", () =
 test("tapeItems: valid quotes only, compact form, down flag", () => {
   const list = [quote("AAPL", 306.87, 305.59), quote("NOPE", null, null, "Not Found"), quote("MSFT", 410.05, 412.10)]
   assert.deepEqual(Model.tapeItems(list, false), [
-    { symbol: "AAPL", text: "AAPL 306.87 ▲0.42%", down: false },
-    { symbol: "MSFT", text: "MSFT 410.05 ▼0.50%", down: true }
+    { symbol: "AAPL", text: "AAPL 306.87 ▲0.42%", up: true, down: false },
+    { symbol: "MSFT", text: "MSFT 410.05 ▼0.50%", up: false, down: true }
   ])
+  assert.deepEqual(Model.tapeItems([quote("FLAT", 10, 10)], false), [{ symbol: "FLAT", text: "FLAT 10.00 •0.00%", up: false, down: false }])
   assert.deepEqual(Model.tapeItems(list, true).map(i => i.text), ["AAPL ▲0.42%", "MSFT ▼0.50%"])
   assert.deepEqual(Model.tapeItems([], false), [])
   assert.deepEqual(Model.tapeItems(null, false), [])
@@ -328,4 +329,25 @@ test("formatVolume", () => {
   assert.equal(Model.formatVolume(1234567890), "1.23B")
   assert.equal(Model.formatVolume(0), "0")
   assert.equal(Model.formatVolume(null), "")
+})
+
+test("normalizeColor: accepts #rgb/#rrggbb/#aarrggbb, rejects junk", () => {
+  assert.equal(Model.normalizeColor("#a9b665"), "#a9b665")
+  assert.equal(Model.normalizeColor(" #A9B665 "), "#a9b665")
+  assert.equal(Model.normalizeColor("#fff"), "#fff")
+  assert.equal(Model.normalizeColor("#80a9b665"), "#80a9b665")
+  assert.equal(Model.normalizeColor("green"), "")
+  assert.equal(Model.normalizeColor("#12345"), "")
+  assert.equal(Model.normalizeColor(null), "")
+})
+
+test("parseThemeColor: reads a key from Omarchy's colors.toml", () => {
+  const toml = 'mode = "dark"\n\naccent = "#7daea3"\n\nred = "#ea6962"\ngreen = "#a9b665"\nbright_green = "#a9b665"\n'
+  assert.equal(Model.parseThemeColor(toml, "green"), "#a9b665")
+  assert.equal(Model.parseThemeColor(toml, "red"), "#ea6962")
+  assert.equal(Model.parseThemeColor(toml, "bright_green"), "#a9b665")
+  assert.equal(Model.parseThemeColor(toml, "purple"), "")
+  assert.equal(Model.parseThemeColor("green = 'not-a-color'", "green"), "")
+  assert.equal(Model.parseThemeColor("", "green"), "")
+  assert.equal(Model.parseThemeColor(null, "green"), "")
 })

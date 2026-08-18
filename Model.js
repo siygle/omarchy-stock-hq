@@ -72,14 +72,14 @@ function chartUrl(symbol, range) {
 }
 
 function tickerWidth(value, fallback) {
-  var d = fallback === undefined || fallback === null ? 360 : fallback
+  var d = fallback === undefined || fallback === null ? 180 : fallback
   var n = parseInt(String(value), 10)
   if (isNaN(n)) return d
   return n < 80 ? 80 : n
 }
 
 function scrollSpeed(value, fallback) {
-  var d = fallback === undefined || fallback === null ? 40 : fallback
+  var d = fallback === undefined || fallback === null ? 20 : fallback
   var n = parseFloat(String(value))
   if (isNaN(n) || n < 0) return d
   return n
@@ -254,6 +254,10 @@ function isDown(quote) {
   return isValid(quote) && quote.change !== null && quote.change !== undefined && quote.change < 0
 }
 
+function isUp(quote) {
+  return isValid(quote) && quote.change !== null && quote.change !== undefined && quote.change > 0
+}
+
 function validCount(quotes) {
   var list = quotes || []
   var n = 0
@@ -421,9 +425,34 @@ function tapeItems(quotes, compact) {
   var out = []
   for (var i = 0; i < list.length; i++) {
     if (!isValid(list[i])) continue
-    out.push({ symbol: String(list[i].symbol || ""), text: barLabel(list[i], compact), down: isDown(list[i]) })
+    out.push({
+      symbol: String(list[i].symbol || ""),
+      text: barLabel(list[i], compact),
+      up: isUp(list[i]),
+      down: isDown(list[i])
+    })
   }
   return out
+}
+
+// ---- Colors. Omarchy themes expose their palette in
+//      ~/.local/state/omarchy/current/theme/colors.toml (`green = "#a9b665"`);
+//      the shell's Color singleton only carries foreground/accent/urgent/muted,
+//      so up/down tints are read from that file, with settings overrides.
+
+function normalizeColor(value) {
+  var s = trimString(value).toLowerCase()
+  return /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/.test(s) ? s : ""
+}
+
+function parseThemeColor(tomlText, key) {
+  var lines = String(tomlText || "").split("\n")
+  var pattern = new RegExp("^\\s*" + key + "\\s*=\\s*[\"']([^\"']*)[\"']")
+  for (var i = 0; i < lines.length; i++) {
+    var m = lines[i].match(pattern)
+    if (m) return normalizeColor(m[1])
+  }
+  return ""
 }
 
 function formatVolume(value) {
@@ -451,6 +480,7 @@ if (typeof module !== "undefined") {
     parseQuoteLines: parseQuoteLines,
     isValid: isValid,
     isDown: isDown,
+    isUp: isUp,
     validCount: validCount,
     firstValidIndex: firstValidIndex,
     nextIndex: nextIndex,
@@ -471,6 +501,8 @@ if (typeof module !== "undefined") {
     seriesPoints: seriesPoints,
     valueToY: valueToY,
     tapeItems: tapeItems,
+    normalizeColor: normalizeColor,
+    parseThemeColor: parseThemeColor,
     formatVolume: formatVolume
   }
 }
