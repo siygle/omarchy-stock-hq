@@ -64,9 +64,9 @@ neutral fallback.
 
 ## Develop
 
+Clone this repository (or your fork), then from its root:
+
 ```sh
-git clone https://github.com/5d0tal1gat0r/omarchy-stocks.git
-cd omarchy-stocks
 node --test test/model.test.js                              # Model.js unit tests
 qmllint -I /usr/share/omarchy/shell Panel.qml
 omarchy plugin validate "$PWD"
