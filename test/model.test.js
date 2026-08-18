@@ -60,14 +60,16 @@ const NOT_FOUND_LINE = JSON.stringify({ chart: { result: null,
   error: { code: "Not Found", description: "No data found, symbol may be delisted" } } })
 
 test("chartUrl: encodes the symbol into the v8 chart endpoint", () => {
-  assert.equal(Model.chartUrl("AAPL"), "https://query1.finance.yahoo.com/v8/finance/chart/AAPL?range=1d&interval=1d")
-  assert.equal(Model.chartUrl("^GSPC"), "https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?range=1d&interval=1d")
+  assert.equal(Model.chartUrl("AAPL"), "https://query1.finance.yahoo.com/v8/finance/chart/AAPL?range=1d&interval=5m")
+  assert.equal(Model.chartUrl("^GSPC"), "https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?range=1d&interval=5m")
+  assert.equal(Model.chartUrl("AAPL", "1mo"), "https://query1.finance.yahoo.com/v8/finance/chart/AAPL?range=1mo&interval=1d")
 })
 
 test("curlCommand: one curl, one URL per symbol, newline write-out, custom UA", () => {
   const cmd = Model.curlCommand(["AAPL", "BTC-USD"], "test-agent/1.0")
   assert.deepEqual(cmd.slice(0, 8), ["curl", "-sS", "--max-time", "10", "-A", "test-agent/1.0", "-w", "\n"])
   assert.deepEqual(cmd.slice(8), [Model.chartUrl("AAPL"), Model.chartUrl("BTC-USD")])
+  assert.deepEqual(Model.curlCommand(["AAPL"], "ua", "6mo").slice(8), [Model.chartUrl("AAPL", "6mo")])
 })
 
 test("quoteUrl / shellQuote", () => {
@@ -216,4 +218,114 @@ test("verticalLabel / loadingLabel", () => {
   assert.equal(Model.verticalLabel(null), "")
   assert.equal(Model.loadingLabel("AAPL"), "AAPL …")
   assert.equal(Model.loadingLabel(""), "…")
+})
+
+// ---- Revision 2: ranges, series, tape, chart geometry
+
+test("chartRange / chartInterval: validated ranges map to Yahoo intervals", () => {
+  assert.deepEqual(Model.CHART_RANGES, ["1d", "5d", "1mo", "6mo", "1y"])
+  assert.equal(Model.chartRange("1mo"), "1mo")
+  assert.equal(Model.chartRange(" 6MO "), "6mo")
+  assert.equal(Model.chartRange("2y"), "1d")
+  assert.equal(Model.chartRange(null), "1d")
+  assert.equal(Model.chartRange(null, "5d"), "5d")
+  assert.equal(Model.chartInterval("1d"), "5m")
+  assert.equal(Model.chartInterval("5d"), "15m")
+  assert.equal(Model.chartInterval("1mo"), "1d")
+  assert.equal(Model.chartInterval("6mo"), "1d")
+  assert.equal(Model.chartInterval("1y"), "1wk")
+  assert.equal(Model.chartInterval("bogus"), "1d")
+})
+
+test("tickerWidth / scrollSpeed clamps", () => {
+  assert.equal(Model.tickerWidth(500), 500)
+  assert.equal(Model.tickerWidth("240"), 240)
+  assert.equal(Model.tickerWidth(10), 80)
+  assert.equal(Model.tickerWidth("x"), 360)
+  assert.equal(Model.tickerWidth(undefined, 300), 300)
+  assert.equal(Model.scrollSpeed(60), 60)
+  assert.equal(Model.scrollSpeed("12.5"), 12.5)
+  assert.equal(Model.scrollSpeed(0), 0)
+  assert.equal(Model.scrollSpeed(-3), 40)
+  assert.equal(Model.scrollSpeed("fast"), 40)
+  assert.equal(Model.scrollSpeed(null, 25), 25)
+})
+
+const SERIES_LINE = JSON.stringify({ chart: { result: [{ meta: {
+  currency: "USD", symbol: "AAPL", regularMarketPrice: 305.59, previousClose: 305.93,
+  chartPreviousClose: 333.74, regularMarketVolume: 32743947, shortName: "Apple Inc.", regularMarketTime: 1786996801
+}, timestamp: [100, 200, 300, 400], indicators: { quote: [{
+  close: [305.76, null, 305.69, 305.59], open: [null, 305.8, 305.7, 305.6]
+}] } }], error: null } })
+
+test("parseChartResponse: series skips nulls, reads open/volume, prefers previousClose", () => {
+  const q = Model.parseChartResponse(SERIES_LINE)
+  assert.deepEqual(q.series, [{ t: 100, c: 305.76 }, { t: 300, c: 305.69 }, { t: 400, c: 305.59 }])
+  assert.equal(q.open, 305.8)
+  assert.equal(q.volume, 32743947)
+  assert.equal(q.prevClose, 305.93)
+  const bare = Model.parseChartResponse(JSON.stringify({ chart: { result: [{ meta: { symbol: "X", regularMarketPrice: 2 } }] } }))
+  assert.deepEqual(bare.series, [])
+  assert.equal(bare.open, null)
+  assert.equal(bare.volume, null)
+  assert.deepEqual(Model.emptyQuote("Z", "No data").series, [])
+})
+
+test("parseSeriesLines: symbol -> series map, missing symbols get []", () => {
+  const map = Model.parseSeriesLines(SERIES_LINE + "\n" + NOT_FOUND_LINE + "\n", ["AAPL", "NOPE"])
+  assert.equal(map.AAPL.length, 3)
+  assert.deepEqual(map.NOPE, [])
+})
+
+test("seriesBounds / seriesDirection", () => {
+  const s = [{ t: 0, c: 10 }, { t: 5, c: 14 }, { t: 10, c: 12 }]
+  assert.deepEqual(Model.seriesBounds(s), { min: 10, max: 14 })
+  assert.equal(Model.seriesBounds([]), null)
+  assert.equal(Model.seriesBounds(null), null)
+  assert.equal(Model.seriesDirection(s), 2)
+  assert.equal(Model.seriesDirection([{ t: 0, c: 3 }, { t: 1, c: 1 }]), -2)
+  assert.equal(Model.seriesDirection([{ t: 0, c: 3 }]), 0)
+  assert.equal(Model.seriesDirection([]), 0)
+})
+
+test("seriesPoints: time-proportional x, value-scaled y within padding", () => {
+  const s = [{ t: 0, c: 10 }, { t: 5, c: 14 }, { t: 10, c: 12 }]
+  const pts = Model.seriesPoints(s, 100, 40, 2)
+  assert.equal(pts.length, 3)
+  assert.deepEqual(pts[0], { x: 2, y: 38 })     // min value -> bottom
+  assert.deepEqual(pts[1], { x: 50, y: 2 })     // max value -> top
+  assert.deepEqual(pts[2], { x: 98, y: 20 })    // midway value -> middle
+  assert.deepEqual(Model.seriesPoints([{ t: 3, c: 7 }], 100, 40, 2), [{ x: 2, y: 20 }])
+  assert.deepEqual(Model.seriesPoints([{ t: 3, c: 7 }, { t: 9, c: 7 }], 100, 40, 2), [{ x: 2, y: 20 }, { x: 98, y: 20 }])
+  assert.deepEqual(Model.seriesPoints([], 100, 40, 2), [])
+})
+
+test("valueToY: inside the bounds maps like seriesPoints, outside is null", () => {
+  const b = { min: 10, max: 14 }
+  assert.equal(Model.valueToY(10, b, 40, 2), 38)
+  assert.equal(Model.valueToY(14, b, 40, 2), 2)
+  assert.equal(Model.valueToY(12, b, 40, 2), 20)
+  assert.equal(Model.valueToY(9, b, 40, 2), null)
+  assert.equal(Model.valueToY(null, b, 40, 2), null)
+  assert.equal(Model.valueToY(12, null, 40, 2), null)
+})
+
+test("tapeItems: valid quotes only, compact form, down flag", () => {
+  const list = [quote("AAPL", 306.87, 305.59), quote("NOPE", null, null, "Not Found"), quote("MSFT", 410.05, 412.10)]
+  assert.deepEqual(Model.tapeItems(list, false), [
+    { symbol: "AAPL", text: "AAPL 306.87 ▲0.42%", down: false },
+    { symbol: "MSFT", text: "MSFT 410.05 ▼0.50%", down: true }
+  ])
+  assert.deepEqual(Model.tapeItems(list, true).map(i => i.text), ["AAPL ▲0.42%", "MSFT ▼0.50%"])
+  assert.deepEqual(Model.tapeItems([], false), [])
+  assert.deepEqual(Model.tapeItems(null, false), [])
+})
+
+test("formatVolume", () => {
+  assert.equal(Model.formatVolume(950), "950")
+  assert.equal(Model.formatVolume(114897), "114.9K")
+  assert.equal(Model.formatVolume(32743947), "32.7M")
+  assert.equal(Model.formatVolume(1234567890), "1.23B")
+  assert.equal(Model.formatVolume(0), "0")
+  assert.equal(Model.formatVolume(null), "")
 })
