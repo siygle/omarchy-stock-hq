@@ -2,14 +2,22 @@ import QtQuick
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
+import "Model.js" as Model
 
-// Bar entry for the Stocks widget: a text pill that mirrors the panel's
-// cycling label. Panel plumbing follows omarchy.weather / omarchy.clock so
-// `omarchy-shell shell summon|hide|toggle io.github.al1gat0r.stocks` route
-// here through the bar's open/close/opened contract.
+// Bar entry for the Stocks widget: a fixed-width ticker tape that scrolls the
+// panel's quotes right-to-left. Panel plumbing follows omarchy.weather /
+// omarchy.clock so `omarchy-shell shell summon|hide|toggle
+// io.github.al1gat0r.stocks` route here through the bar's open/close/opened
+// contract.
 BarWidget {
   id: root
   moduleName: "io.github.al1gat0r.stocks"
+
+  // ---- Settings (inline on this widget's shell.json entry).
+  readonly property int tickerWidth: Model.tickerWidth(setting("tickerWidth", 360))
+  readonly property real scrollSpeed: Model.scrollSpeed(setting("scrollSpeed", 40))
+
+  property bool pausedByUser: false
 
   function injectPanel() {
     var target = panelLoader.item
@@ -28,12 +36,8 @@ BarWidget {
     if (panelLoader.item && panelLoader.item.toggle) panelLoader.item.toggle()
   }
 
-  function nextSymbol() {
-    if (panelLoader.item && panelLoader.item.stepSymbol) panelLoader.item.stepSymbol(1)
-  }
-
-  function prevSymbol() {
-    if (panelLoader.item && panelLoader.item.stepSymbol) panelLoader.item.stepSymbol(-1)
+  function togglePause() {
+    pausedByUser = !pausedByUser
   }
 
   // Shape contract for shell.summon/hide/toggle routing (the bar requires
@@ -56,7 +60,11 @@ BarWidget {
     if (panelLoader.item) panelLoader.item.closeForPopoutSwitch()
   }
 
-  readonly property string pillText: panelLoader.item
+  readonly property var tapeItems: panelLoader.item ? panelLoader.item.tapeItems : []
+  readonly property bool hasTape: !root.vertical && tapeItems.length > 0
+  // What the plain label shows when the tape has nothing: stacked SYM/arrow
+  // on vertical bars, "AAPL …" / "AAPL !" otherwise.
+  readonly property string fallbackText: panelLoader.item
     ? (root.vertical ? panelLoader.item.verticalText : panelLoader.item.label)
     : ""
 
@@ -81,8 +89,7 @@ BarWidget {
     target: "io.github.al1gat0r.stocks"
 
     function refresh(): void { root.broadcast("refresh") }
-    function next(): void { root.broadcast("nextSymbol") }
-    function prev(): void { root.broadcast("prevSymbol") }
+    function pause(): void { root.broadcast("togglePause") }
     function open(): void { root.open() }
     function close(): void { root.close() }
     function show(): void { root.open() }
@@ -94,21 +101,89 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.pillText
-    // Theme "urgent" color while the shown symbol is down; plain otherwise.
-    active: panelLoader.item ? panelLoader.item.currentIsDown === true : false
+    text: root.fallbackText
+    labelVisible: !root.hasTape
+    hasVisualContent: true
+    fixedWidth: root.hasTape ? root.tickerWidth : -1
     // The panel is the detail view, so no tooltip (as with omarchy.weather).
     tooltipText: ""
 
     onPressed: function(b) {
       if (b === Qt.MiddleButton) root.refresh()
-      else if (b === Qt.RightButton) root.nextSymbol()
+      else if (b === Qt.RightButton) root.togglePause()
       else root.togglePanel()
     }
 
-    onWheelMoved: function(delta) {
-      if (delta > 0) root.prevSymbol()
-      else if (delta < 0) root.nextSymbol()
+    // ---- Tape viewport: a run of every item, repeated enough times to cover
+    //      the viewport plus one extra run, animated left by exactly one run
+    //      width so the loop is seamless.
+    Item {
+      id: tape
+      visible: root.hasTape
+      anchors.fill: parent
+      anchors.leftMargin: Style.space(6)
+      anchors.rightMargin: Style.space(6)
+      clip: true
+
+      readonly property string separator: "  •  "
+      readonly property real runWidth: measure.implicitWidth
+      readonly property int copies: runWidth > 0 ? Math.max(2, Math.ceil(width / runWidth) + 1) : 2
+      readonly property bool scrolling: root.hasTape && root.scrollSpeed > 0 && runWidth > 0
+        && !root.pausedByUser && !button.tooltipHovered
+      property real offset: 0
+
+      // Invisible single run used only to measure one loop's width.
+      Row {
+        id: measure
+        visible: false
+        spacing: 0
+        Repeater {
+          model: root.tapeItems
+          Text {
+            required property var modelData
+            text: modelData.text + tape.separator
+            font.family: button.fontFamily
+            font.pixelSize: button.fontSize
+          }
+        }
+      }
+
+      Row {
+        id: strip
+        x: -tape.offset
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: 0
+
+        Repeater {
+          model: tape.copies
+
+          Row {
+            spacing: 0
+            Repeater {
+              model: root.tapeItems
+
+              Text {
+                required property var modelData
+                text: modelData.text + tape.separator
+                color: modelData.down ? button.activeColor : button.foreground
+                font.family: button.fontFamily
+                font.pixelSize: button.fontSize
+                renderType: Text.NativeRendering
+              }
+            }
+          }
+        }
+      }
+
+      // Advances by elapsed time so hover/pause resumes exactly where it
+      // stopped, and the modulo keeps a changing run width seamless.
+      FrameAnimation {
+        running: tape.scrolling
+        onTriggered: {
+          if (tape.runWidth <= 0) return
+          tape.offset = (tape.offset + frameTime * root.scrollSpeed) % tape.runWidth
+        }
+      }
     }
   }
 }
