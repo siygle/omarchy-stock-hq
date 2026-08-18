@@ -138,3 +138,82 @@ test("parseQuoteLines: the requested symbol wins over Yahoo's casing", () => {
   assert.equal(quotes[0].symbol, "AAPL")
   assert.deepEqual(Model.parseQuoteLines("", []), [])
 })
+
+function quote(symbol, price, prev, error) {
+  const q = Model.emptyQuote(symbol, error || "")
+  q.price = price === undefined ? null : price
+  q.prevClose = prev === undefined ? null : prev
+  q.change = q.price !== null && q.prevClose !== null ? q.price - q.prevClose : null
+  q.changePct = q.change !== null && q.prevClose ? q.change / q.prevClose * 100 : null
+  return q
+}
+
+test("isValid / isDown / validCount", () => {
+  assert.equal(Model.isValid(quote("AAPL", 305.59, 305.93)), true)
+  assert.equal(Model.isValid(quote("NOPE", null, null, "Not Found")), false)
+  assert.equal(Model.isValid(null), false)
+  assert.equal(Model.isDown(quote("AAPL", 305.59, 305.93)), true)
+  assert.equal(Model.isDown(quote("GOOGL", 346, 345.9)), false)
+  assert.equal(Model.isDown(quote("FLAT", 10, 10)), false)
+  assert.equal(Model.isDown(null), false)
+  assert.equal(Model.validCount([quote("A", 1, 1), quote("B", null, null, "Not Found"), quote("C", 2, 1)]), 2)
+  assert.equal(Model.validCount(null), 0)
+})
+
+test("firstValidIndex / nextIndex skip invalid quotes and wrap", () => {
+  const list = [quote("A", null, null, "Not Found"), quote("B", 1, 1), quote("C", 2, 1), quote("D", null, null, "No data")]
+  assert.equal(Model.firstValidIndex(list), 1)
+  assert.equal(Model.firstValidIndex([quote("X", null, null, "Not Found")]), -1)
+  assert.equal(Model.firstValidIndex([]), -1)
+  assert.equal(Model.nextIndex(1, list, 1), 2)
+  assert.equal(Model.nextIndex(2, list, 1), 1)      // wraps past D and A
+  assert.equal(Model.nextIndex(1, list, -1), 2)     // backwards wraps past A and D
+  assert.equal(Model.nextIndex(-1, list, 1), 1)     // no current -> first valid
+  assert.equal(Model.nextIndex(0, [quote("B", 1, 1)], 1), 0)
+  assert.equal(Model.nextIndex(0, [quote("X", null, null, "Not Found")], 1), -1)
+  assert.equal(Model.nextIndex(0, [], 1), -1)
+})
+
+test("shouldRetry: only when some failure is not a plain 'Not Found'", () => {
+  assert.equal(Model.shouldRetry([quote("A", null, null, "Not Found")]), false)
+  assert.equal(Model.shouldRetry([quote("A", null, null, "Not Found"), quote("B", null, null, "No data")]), true)
+  assert.equal(Model.shouldRetry([quote("A", null, null, "Bad response")]), true)
+  assert.equal(Model.shouldRetry([]), true)
+})
+
+test("formatPrice: 2 decimals, 4 below 1, thousands separators", () => {
+  assert.equal(Model.formatPrice(305.59), "305.59")
+  assert.equal(Model.formatPrice(344), "344.00")
+  assert.equal(Model.formatPrice(65432.1), "65,432.10")
+  assert.equal(Model.formatPrice(1234567.891), "1,234,567.89")
+  assert.equal(Model.formatPrice(0.12345), "0.1235")
+  assert.equal(Model.formatPrice(-2.5), "-2.50")
+  assert.equal(Model.formatPrice(null), "")
+  assert.equal(Model.formatPrice(NaN), "")
+})
+
+test("formatChange: arrow, signed absolute change, percent", () => {
+  assert.equal(Model.formatChange(quote("A", 306.87, 305.59)), "▲ +1.28 (0.42%)")
+  assert.equal(Model.formatChange(quote("B", 410.05, 412.10)), "▼ -2.05 (0.50%)")
+  assert.equal(Model.formatChange(quote("C", 10, 10)), "• +0.00 (0.00%)")
+  assert.equal(Model.formatChange(quote("D", 0.5, 0.4)), "▲ +0.1000 (25.00%)")
+  assert.equal(Model.formatChange(quote("E", 5, null)), "")
+  assert.equal(Model.formatChange(null), "")
+})
+
+test("barLabel: full, compact, error, no-change", () => {
+  assert.equal(Model.barLabel(quote("AAPL", 306.87, 305.59), false), "AAPL 306.87 ▲0.42%")
+  assert.equal(Model.barLabel(quote("AAPL", 306.87, 305.59), true), "AAPL ▲0.42%")
+  assert.equal(Model.barLabel(quote("MSFT", 410.05, 412.10), false), "MSFT 410.05 ▼0.50%")
+  assert.equal(Model.barLabel(quote("X", 5, null), false), "X 5.00")
+  assert.equal(Model.barLabel(quote("NOPE", null, null, "Not Found"), false), "NOPE !")
+  assert.equal(Model.barLabel(null, false), "")
+})
+
+test("verticalLabel / loadingLabel", () => {
+  assert.equal(Model.verticalLabel(quote("AAPL", 306.87, 305.59)), "AAPL\n▲")
+  assert.equal(Model.verticalLabel(quote("NOPE", null, null, "Not Found")), "NOPE\n!")
+  assert.equal(Model.verticalLabel(null), "")
+  assert.equal(Model.loadingLabel("AAPL"), "AAPL …")
+  assert.equal(Model.loadingLabel(""), "…")
+})
