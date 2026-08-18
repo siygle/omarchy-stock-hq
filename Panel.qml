@@ -26,6 +26,10 @@ Panel {
   readonly property int refreshMinutes: Model.refreshMinutes(setting("refreshMinutes", 5))
   readonly property bool compact: setting("compact", false) === true || String(setting("compact", false)) === "true"
   readonly property string activeRange: Model.chartRange(setting("chartRange", "1d"))
+  readonly property string displayCurrency: Model.normalizeCurrency(setting("currency", ""))
+  readonly property var currencies: Model.normalizeCurrencies(setting("currencies", null))
+  readonly property string upColorSetting: Model.normalizeColor(setting("upColor", ""))
+  readonly property string downColorSetting: Model.normalizeColor(setting("downColor", ""))
 
   // ---- Quote state. `quotes` keeps the last good result across failures so
   //      stale-but-useful numbers stay visible; `fetchError` explains why.
@@ -43,22 +47,29 @@ Panel {
   property bool chartLoading: false
   property double chartFetchedAt: 0
 
+  // ---- FX rates ("USDEUR=X" -> 0.92) for the display currency.
+  property var rates: ({})
+  property var ratesRequested: []
+  property int ratesRetries: 0
+
   readonly property string userAgent: "Mozilla/5.0 (X11; Linux x86_64) omarchy-stocks/0.1.0"
   readonly property bool loading: quotes.length === 0 && fetchError === ""
   readonly property int validCount: Model.validCount(quotes)
-  readonly property var tapeItems: Model.tapeItems(quotes, compact)
-  readonly property var selectedQuote: selectedIndex >= 0 && selectedIndex < quotes.length ? quotes[selectedIndex] : null
+  // Quotes as displayed: converted into the display currency when a rate is known.
+  readonly property var shownQuotes: Model.convertAll(quotes, displayCurrency, rates)
+  readonly property var tapeItems: Model.tapeItems(shownQuotes, compact)
+  readonly property var selectedQuote: selectedIndex >= 0 && selectedIndex < shownQuotes.length ? shownQuotes[selectedIndex] : null
   readonly property bool hasSelection: Model.isValid(selectedQuote)
 
   // Fallback pill text while the tape has nothing to show: "AAPL …" while
   // loading, "AAPL !" when every symbol failed.
-  readonly property string label: quotes.length > 0
-    ? Model.barLabel(quotes[0], compact)
+  readonly property string label: shownQuotes.length > 0
+    ? Model.barLabel(shownQuotes[0], compact)
     : Model.loadingLabel(symbols.length ? symbols[0] : "")
   readonly property string verticalText: {
-    var first = Model.firstValidIndex(quotes)
-    if (first >= 0) return Model.verticalLabel(quotes[first])
-    if (quotes.length > 0) return Model.verticalLabel(quotes[0])
+    var first = Model.firstValidIndex(shownQuotes)
+    if (first >= 0) return Model.verticalLabel(shownQuotes[first])
+    if (shownQuotes.length > 0) return Model.verticalLabel(shownQuotes[0])
     return (symbols.length ? symbols[0] : "") + "\n…"
   }
 
@@ -66,6 +77,41 @@ Panel {
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property color mutedForeground: Qt.darker(barForeground, 1.5)
   readonly property color urgentForeground: bar ? bar.urgent : Color.urgent
+
+  // Up/down tints: settings override > theme palette (colors.toml) > fallback.
+  property string themeGreen: ""
+  property string themeRed: ""
+  readonly property color upColor: upColorSetting !== "" ? upColorSetting : (themeGreen !== "" ? themeGreen : "#5fbf6f")
+  readonly property color downColor: downColorSetting !== "" ? downColorSetting : (themeRed !== "" ? themeRed : urgentForeground)
+
+  function trendColor(quote) {
+    if (Model.isDown(quote)) return downColor
+    if (Model.isUp(quote)) return upColor
+    return barForeground
+  }
+
+  function directionColor(series) {
+    var d = Model.seriesDirection(series)
+    if (d < 0) return downColor
+    if (d > 0) return upColor
+    return barForeground
+  }
+
+  FileView {
+    id: themeColors
+    path: Color.currentThemePath + "/colors.toml"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: {
+      root.themeGreen = Model.parseThemeColor(text(), "green")
+      root.themeRed = Model.parseThemeColor(text(), "red")
+    }
+    onLoadFailed: {
+      root.themeGreen = ""
+      root.themeRed = ""
+    }
+  }
 
   function open() {
     root.controller.show()
@@ -122,8 +168,53 @@ Panel {
     lastUpdated = new Date()
     fetchError = ""
     retries = 0
+    ensureRates()
     // Fresh quotes deserve fresh charts, unless the cache is under a minute old.
     if (root.opened && Date.now() - chartFetchedAt > 60000) ensureChartSeries(true)
+  }
+
+  // ---- FX rates for the display currency: one pair per distinct quote
+  //      currency, refreshed with every quote refresh (a couple of URLs).
+  function ensureRates() {
+    var pairs = Model.ratePairs(quotes, displayCurrency)
+    if (!pairs.length || ratesProc.running) return
+    ratesRequested = pairs
+    ratesProc.command = Model.curlCommand(pairs, userAgent, "1d")
+    ratesProc.running = true
+  }
+
+  function handleRatesOutput(text) {
+    var raw = String(text || "")
+    var fresh = raw.replace(/\s+/g, "") === "" ? {} : Model.parseRateLines(raw, ratesRequested)
+    var missing = false
+    for (var i = 0; i < ratesRequested.length; i++) if (fresh[ratesRequested[i]] === undefined) missing = true
+    if (missing && ratesRetries < 3) {
+      ratesRetries++
+      ratesRetryTimer.restart()
+    } else {
+      ratesRetries = 0
+    }
+    var merged = {}
+    for (var k in rates) merged[k] = rates[k]
+    for (var f in fresh) merged[f] = fresh[f]
+    rates = merged
+  }
+
+  function selectCurrency(step) {
+    var next = Model.currencyCycle(displayCurrency, currencies, step)
+    if (next === displayCurrency) return
+    var entry = { id: root.moduleName }
+    for (var key in root.settings) if (key !== "id") entry[key] = root.settings[key]
+    entry.currency = next
+    root.settings = entry
+    if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
+      root.bar.shell.updateEntryInline(root.moduleName, entry)
+  }
+
+  function currencyLabel(quote) {
+    if (!quote) return ""
+    if (quote.converted) return quote.nativeCurrency + " → " + quote.currency
+    return quote.currency
   }
 
   function scheduleRetry() {
@@ -158,10 +249,13 @@ Panel {
     if (chartRequestedRange !== activeRange) Qt.callLater(root.startChartFetch)
   }
 
+  // 1d series ride along with the (already converted) quote; other ranges
+  // come from the raw chart cache and are converted here.
   function seriesFor(quote) {
     if (!quote) return []
     if (activeRange === "1d") return quote.series || []
-    return chartSeries[quote.symbol] || []
+    var raw = chartSeries[quote.symbol] || []
+    return Model.convertSeries(raw, Model.rateFor(quote.nativeCurrency || quote.currency, displayCurrency, rates))
   }
 
   // Range chips persist their choice into this widget's shell.json entry, the
@@ -214,6 +308,7 @@ Panel {
   }
 
   onActiveRangeChanged: if (root.opened) ensureChartSeries(false)
+  onDisplayCurrencyChanged: ensureRates()
 
   // Keep the detail block on a valid symbol when the list shrinks or a symbol fails.
   onQuotesChanged: {
@@ -252,10 +347,24 @@ Panel {
     }
   }
 
+  Process {
+    id: ratesProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.handleRatesOutput(text)
+    }
+  }
+
   Timer {
     id: retryTimer
     interval: 2500
     onTriggered: root.startFetch()
+  }
+
+  Timer {
+    id: ratesRetryTimer
+    interval: 2500
+    onTriggered: root.ensureRates()
   }
 
   Timer {
@@ -332,7 +441,7 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(440))
+    contentWidth: panel.fittedContentWidth(Style.space(500))
     contentHeight: panel.fittedContentHeight(content.implicitHeight)
 
     PanelKeyCatcher {
@@ -403,6 +512,39 @@ Panel {
                 }
               }
             }
+
+            Item { width: Style.space(8); height: 1 }
+
+            // Display currency: click cycles forward, right-click back.
+            Rectangle {
+              id: currencyChip
+              readonly property bool active: root.displayCurrency !== ""
+              width: currencyText.implicitWidth + Style.space(12)
+              height: currencyText.implicitHeight + Style.space(6)
+              radius: Style.cornerRadius
+              color: currencyChip.active
+                ? Style.selectedFillFor(root.barForeground, Color.accent)
+                : (currencyMouse.containsMouse ? Style.hoverFillFor(root.barForeground, Color.accent) : "transparent")
+
+              Text {
+                id: currencyText
+                anchors.centerIn: parent
+                text: (root.displayCurrency !== "" ? root.displayCurrency : "Native") + " ⇄"
+                color: currencyChip.active ? root.barForeground : root.mutedForeground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                font.bold: currencyChip.active
+              }
+
+              MouseArea {
+                id: currencyMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                cursorShape: Qt.PointingHandCursor
+                onClicked: function(mouse) { root.selectCurrency(mouse.button === Qt.RightButton ? -1 : 1) }
+              }
+            }
           }
 
           Text {
@@ -426,18 +568,18 @@ Panel {
           spacing: 0
 
           Repeater {
-            model: root.quotes
+            model: root.shownQuotes
 
             Rectangle {
               id: row
               required property var modelData
               required property int index
               readonly property bool valid: Model.isValid(modelData)
-              readonly property bool down: Model.isDown(modelData)
               readonly property bool selected: index === root.selectedIndex && root.hasSelection
               readonly property var series: root.activeRange === "1d"
                 ? (modelData.series || [])
-                : (root.chartSeries[modelData.symbol] || [])
+                : Model.convertSeries(root.chartSeries[modelData.symbol] || [],
+                    Model.rateFor(modelData.nativeCurrency || modelData.currency, root.displayCurrency, root.rates))
 
               width: parent.width
               height: symbolText.implicitHeight + Style.space(14)
@@ -482,7 +624,7 @@ Panel {
                 height: Style.space(20)
                 visible: row.valid
                 series: row.series
-                lineColor: Model.seriesDirection(row.series) < 0 ? root.urgentForeground : root.barForeground
+                lineColor: root.directionColor(row.series)
                 lineWidth: 1.25
                 pad: 1.5
               }
@@ -508,7 +650,7 @@ Panel {
                 width: Style.space(112)
                 horizontalAlignment: Text.AlignRight
                 text: row.valid ? Model.formatChange(row.modelData) : ""
-                color: row.down ? root.urgentForeground : root.barForeground
+                color: root.trendColor(row.modelData)
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.body
               }
@@ -548,7 +690,6 @@ Panel {
 
           readonly property var quote: root.selectedQuote
           readonly property var series: root.hasSelection ? root.seriesFor(root.selectedQuote) : []
-          readonly property bool down: Model.isDown(quote)
           readonly property var bounds: Model.seriesBounds(series)
           readonly property real statLabelWidth: Style.space(84)
           readonly property real statValueWidth: (width - Style.space(16)) / 2 - statLabelWidth
@@ -578,7 +719,7 @@ Panel {
               Text {
                 width: parent.width
                 text: detail.quote
-                  ? [detail.quote.symbol, detail.quote.exchange, detail.quote.currency].filter(function(p) { return !!p }).join(" · ")
+                  ? [detail.quote.symbol, detail.quote.exchange, root.currencyLabel(detail.quote)].filter(function(p) { return !!p }).join(" · ")
                   : ""
                 elide: Text.ElideRight
                 color: root.mutedForeground
@@ -605,7 +746,7 @@ Panel {
               Text {
                 anchors.right: parent.right
                 text: detail.quote ? Model.formatChange(detail.quote) : ""
-                color: detail.down ? root.urgentForeground : root.barForeground
+                color: root.trendColor(detail.quote)
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.body
               }
@@ -622,7 +763,7 @@ Panel {
               anchors.leftMargin: Style.space(8)
               anchors.rightMargin: Style.space(8)
               series: detail.series
-              lineColor: Model.seriesDirection(detail.series) < 0 ? root.urgentForeground : root.barForeground
+              lineColor: root.directionColor(detail.series)
               lineWidth: 1.75
               pad: 4
               fill: true
