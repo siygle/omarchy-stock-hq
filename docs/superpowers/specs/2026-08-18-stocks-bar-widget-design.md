@@ -1,7 +1,7 @@
 # Stocks bar widget for Omarchy Quattro — design
 
 **Date:** 2026-08-18
-**Plugin id:** `io.github.al1gat0r.stocks`
+**Plugin id:** `io.github.5d0tal1gat0r.stocks`
 **Target:** Omarchy 4.0 (Quattro) `omarchy-shell` (Quickshell) bar, plugin schema v1
 
 ## Goal
@@ -28,7 +28,7 @@ omarchy-stocks/                    git repo, source of truth
 ```
 
 The plugin is installed with `omarchy plugin add <path-or-git-url> --enable`,
-which git-clones it into `~/.config/omarchy/plugins/io.github.al1gat0r.stocks/`.
+which git-clones it into `~/.config/omarchy/plugins/io.github.5d0tal1gat0r.stocks/`.
 The plugin folder must not be a symlink (fails validation; `inotifywait -r`
 hot-reload does not follow symlinks). During development the working tree is
 rsynced into the installed copy (excluding `.git`) to trigger hot reload.
@@ -38,10 +38,10 @@ rsynced into the installed copy (excluding `.git`) to trigger hot reload.
 ```json
 {
   "schemaVersion": 1,
-  "id": "io.github.al1gat0r.stocks",
+  "id": "io.github.5d0tal1gat0r.stocks",
   "name": "Stocks",
   "version": "0.1.0",
-  "author": "al1gat0r",
+  "author": "5d0tal1gat0r",
   "license": "MIT",
   "description": "Stock ticker pill with a quotes panel for the Omarchy bar (Yahoo Finance, no API key).",
   "kinds": ["bar-widget"],
@@ -60,7 +60,7 @@ rsynced into the installed copy (excluding `.git`) to trigger hot reload.
 Stored inline on the widget's `shell.json` layout entry (per the shell's storage
 rules); read with the `setting(name, fallback)` helper inherited from
 `BarWidget`/`Panel`. Users change them with
-`omarchy bar set io.github.al1gat0r.stocks <key> <value> [--json]`.
+`omarchy bar set io.github.5d0tal1gat0r.stocks <key> <value> [--json]`.
 
 | key              | default                              | rules |
 |------------------|--------------------------------------|-------|
@@ -147,7 +147,7 @@ percentage number (0.42), not a fraction.
   rows with `error` show the symbol and the error text muted. Row click opens
   `Model.quoteUrl(symbol)` with `xdg-open` through `bar.run(...)`. Footer:
   `fetchError` (urgent) when non-empty; otherwise `Middle-click to refresh`.
-- `IpcHandler` on target `io.github.al1gat0r.stocks` with `open/close/show/hide/toggle/refresh`
+- `IpcHandler` on target `io.github.5d0tal1gat0r.stocks` with `open/close/show/hide/toggle/refresh`
   (`manageIpc: false` on the base, own handler like weather so `refresh` exists).
 
 ## BarWidget.qml
@@ -182,12 +182,12 @@ scroll wheel → step to the next/previous valid symbol (restarting the cycle ti
 2. `qmllint -I /usr/share/omarchy/shell BarWidget.qml Panel.qml`.
 3. `omarchy plugin validate <repo>`.
 4. `omarchy plugin add <repo path> --enable --yes` → `omarchy plugin list --json`
-   shows the id enabled; `omarchy bar move io.github.al1gat0r.stocks --section center`.
-5. `omarchy-shell shell summon io.github.al1gat0r.stocks '{}'` /
-   `omarchy-shell shell hide io.github.al1gat0r.stocks`; screenshot with `grim`
+   shows the id enabled; `omarchy bar move io.github.5d0tal1gat0r.stocks --section center`.
+5. `omarchy-shell shell summon io.github.5d0tal1gat0r.stocks '{}'` /
+   `omarchy-shell shell hide io.github.5d0tal1gat0r.stocks`; screenshot with `grim`
    for visual check (also becomes `preview.png`).
 6. `qs log -p /usr/share/omarchy/shell --tail 100` shows no QML errors from the plugin.
-7. Settings round-trip: `omarchy bar set io.github.al1gat0r.stocks symbols '["SPY","QQQ"]' --json`
+7. Settings round-trip: `omarchy bar set io.github.5d0tal1gat0r.stocks symbols '["SPY","QQQ"]' --json`
    updates the pill without restart.
 
 ## Out of scope (v1)
@@ -221,7 +221,7 @@ label hidden and a clipped tape viewport inside:
 - Vertical bars show a static `SYM\n▲` for the first valid symbol.
 - While loading / when nothing is valid the label falls back to `AAPL …` /
   `AAPL !` (v1 behavior).
-- IPC target `io.github.al1gat0r.stocks`: `open close show hide toggle refresh pause`.
+- IPC target `io.github.5d0tal1gat0r.stocks`: `open close show hide toggle refresh pause`.
 - `cycleSeconds` setting is removed. `cycleIndex` becomes the panel's
   `selectedIndex`.
 

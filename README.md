@@ -10,13 +10,13 @@ and a currency switch. Quotes and FX rates come from Yahoo Finance — no API ke
 ## Install
 
 ```sh
-omarchy plugin add https://github.com/al1gat0r/omarchy-stocks.git --enable
+omarchy plugin add https://github.com/5d0tal1gat0r/omarchy-stocks.git --enable
 ```
 
 The widget lands in the bar's center section. Move it with:
 
 ```sh
-omarchy bar move io.github.al1gat0r.stocks --section right
+omarchy bar move io.github.5d0tal1gat0r.stocks --section right
 ```
 
 ## Usage
@@ -31,7 +31,7 @@ omarchy bar move io.github.al1gat0r.stocks --section right
 | panel | click a row | show that symbol's chart and stats |
 | panel | `Open on Yahoo Finance ↗` | open the selected symbol in your browser |
 
-IPC (for keybindings): `omarchy-shell io.github.al1gat0r.stocks toggle|open|close|refresh|pause`
+IPC (for keybindings): `omarchy-shell io.github.5d0tal1gat0r.stocks toggle|open|close|refresh|pause`
 
 ## Configure
 
@@ -39,11 +39,11 @@ Settings live on the widget's entry in `~/.config/omarchy/shell.json` and apply
 instantly:
 
 ```sh
-omarchy bar set io.github.al1gat0r.stocks symbols '["AAPL","MSFT","BTC-USD","^GSPC"]' --json
-omarchy bar set io.github.al1gat0r.stocks tickerWidth 260
-omarchy bar set io.github.al1gat0r.stocks scrollSpeed 30
-omarchy bar set io.github.al1gat0r.stocks currency EUR
-omarchy bar set io.github.al1gat0r.stocks compact true --json    # "AAPL ▲0.42%" without the price
+omarchy bar set io.github.5d0tal1gat0r.stocks symbols '["AAPL","MSFT","BTC-USD","^GSPC"]' --json
+omarchy bar set io.github.5d0tal1gat0r.stocks tickerWidth 260
+omarchy bar set io.github.5d0tal1gat0r.stocks scrollSpeed 30
+omarchy bar set io.github.5d0tal1gat0r.stocks currency EUR
+omarchy bar set io.github.5d0tal1gat0r.stocks compact true --json    # "AAPL ▲0.42%" without the price
 ```
 
 | key | default | meaning |
@@ -65,13 +65,13 @@ neutral fallback.
 ## Develop
 
 ```sh
-git clone https://github.com/al1gat0r/omarchy-stocks.git
+git clone https://github.com/5d0tal1gat0r/omarchy-stocks.git
 cd omarchy-stocks
 node --test test/model.test.js                              # Model.js unit tests
 qmllint -I /usr/share/omarchy/shell Panel.qml
 omarchy plugin validate "$PWD"
 omarchy plugin add "$PWD" --enable                          # installs a clone into ~/.config/omarchy/plugins/
-rsync -a --delete --exclude .git ./ ~/.config/omarchy/plugins/io.github.al1gat0r.stocks/
+rsync -a --delete --exclude .git ./ ~/.config/omarchy/plugins/io.github.5d0tal1gat0r.stocks/
 omarchy restart shell                                       # QML is cached per shell process; a restart loads the edit
 qs log -p /usr/share/omarchy/shell --tail 100               # shell log
 ```
@@ -82,7 +82,7 @@ conversion, chart geometry) so it can be tested with plain Node.
 ## Remove
 
 ```sh
-omarchy plugin remove io.github.al1gat0r.stocks
+omarchy plugin remove io.github.5d0tal1gat0r.stocks
 ```
 
 ## License

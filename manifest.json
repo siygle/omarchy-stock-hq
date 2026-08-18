@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "io.github.al1gat0r.stocks",
+  "id": "io.github.5d0tal1gat0r.stocks",
   "name": "Stocks",
   "version": "0.1.0",
-  "author": "al1gat0r",
+  "author": "5d0tal1gat0r",
   "license": "MIT",
   "description": "Stock ticker pill with a quotes panel for the Omarchy bar (Yahoo Finance, no API key).",
   "kinds": ["bar-widget"],

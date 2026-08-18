@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build `io.github.al1gat0r.stocks`, an Omarchy Quattro shell plugin that shows a cycling stock-ticker pill in the bar with a click-to-open quotes panel, fed by Yahoo Finance with no API key.
+**Goal:** Build `io.github.5d0tal1gat0r.stocks`, an Omarchy Quattro shell plugin that shows a cycling stock-ticker pill in the bar with a click-to-open quotes panel, fed by Yahoo Finance with no API key.
 
 **Architecture:** Three runtime files following the first-party `omarchy.weather` / `omarchy.clock` pattern: `BarWidget.qml` (pill, input, IPC, loads the panel), `Panel.qml` (owns all state: one `curl` `Process`, refresh/cycle/retry timers, popup UI), `Model.js` (pure functions — settings normalization, curl argv, Yahoo JSON parsing, formatting, cycling — unit-tested with `node --test`). Settings live inline on the widget's `shell.json` entry and are read with the inherited `setting()` helper.
 
@@ -12,8 +12,8 @@
 
 ## Global Constraints
 
-- Plugin id everywhere (manifest `id`, `moduleName`, IPC target): `io.github.al1gat0r.stocks`. Never use the `omarchy.*` namespace.
-- Repo root is the plugin root: `~/omarchy-stocks/`. Installed copy: `~/.config/omarchy/plugins/io.github.al1gat0r.stocks/`. No symlinks anywhere inside the plugin folder.
+- Plugin id everywhere (manifest `id`, `moduleName`, IPC target): `io.github.5d0tal1gat0r.stocks`. Never use the `omarchy.*` namespace.
+- Repo root is the plugin root: `~/omarchy-stocks/`. Installed copy: `~/.config/omarchy/plugins/io.github.5d0tal1gat0r.stocks/`. No symlinks anywhere inside the plugin folder.
 - Manifest `schemaVersion: 1`; `kinds: ["bar-widget"]`; `entryPoints.barWidget: "BarWidget.qml"`.
 - Only runtime dependency beyond the shell: `curl` (already on Omarchy). No `jq`, no shell scripts.
 - Model.js must run in both the QML JS engine and Node: ES5-style (`var`, `function`), no `import`/`export`, end with the `if (typeof module !== "undefined") module.exports = {...}` guard exactly like `/usr/share/omarchy/shell/plugins/panels/weather/Model.js`.
@@ -713,10 +713,10 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```json
 {
   "schemaVersion": 1,
-  "id": "io.github.al1gat0r.stocks",
+  "id": "io.github.5d0tal1gat0r.stocks",
   "name": "Stocks",
   "version": "0.1.0",
-  "author": "al1gat0r",
+  "author": "5d0tal1gat0r",
   "license": "MIT",
   "description": "Stock ticker pill with a quotes panel for the Omarchy bar (Yahoo Finance, no API key).",
   "kinds": ["bar-widget"],
@@ -748,7 +748,7 @@ import "Model.js" as Model
 // `label` / `currentIsDown` into the pill (same split as omarchy.weather).
 Panel {
   id: root
-  moduleName: "io.github.al1gat0r.stocks"
+  moduleName: "io.github.5d0tal1gat0r.stocks"
   // The bar entry (BarWidget.qml) owns the IPC target; see its IpcHandler.
   manageIpc: false
 
@@ -1123,7 +1123,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes: Panel.qml's `label`, `verticalText`, `currentIsDown`, `opened`, `popoutSwitchClosing`, `open()`, `close()`, `toggle()`, `closeForPopoutSwitch()`, `refresh()`, `stepSymbol(direction)`; writable `bar`, `settings`, `anchorItem`, `hostWidget`.
-- Produces: the shell's bar-widget contract (`opened`, `open()`, `close()`, `closeForPopoutSwitch()`, `popoutSwitchClosing`) plus IPC target `io.github.al1gat0r.stocks` with `open/close/show/hide/toggle/refresh/next/prev`.
+- Produces: the shell's bar-widget contract (`opened`, `open()`, `close()`, `closeForPopoutSwitch()`, `popoutSwitchClosing`) plus IPC target `io.github.5d0tal1gat0r.stocks` with `open/close/show/hide/toggle/refresh/next/prev`.
 
 - [ ] **Step 1: Write `BarWidget.qml`**
 
@@ -1135,11 +1135,11 @@ import qs.Ui
 
 // Bar entry for the Stocks widget: a text pill that mirrors the panel's
 // cycling label. Panel plumbing follows omarchy.weather / omarchy.clock so
-// `omarchy-shell shell summon|hide|toggle io.github.al1gat0r.stocks` route
+// `omarchy-shell shell summon|hide|toggle io.github.5d0tal1gat0r.stocks` route
 // here through the bar's open/close/opened contract.
 BarWidget {
   id: root
-  moduleName: "io.github.al1gat0r.stocks"
+  moduleName: "io.github.5d0tal1gat0r.stocks"
 
   function injectPanel() {
     var target = panelLoader.item
@@ -1208,7 +1208,7 @@ BarWidget {
   }
 
   IpcHandler {
-    target: "io.github.al1gat0r.stocks"
+    target: "io.github.5d0tal1gat0r.stocks"
 
     function refresh(): void { root.broadcast("refresh") }
     function next(): void { root.broadcast("nextSymbol") }
@@ -1279,26 +1279,26 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 Run:
 ```bash
 omarchy plugin add ~/omarchy-stocks --enable --yes
-omarchy plugin list --json | jq '.[] | select(.id == "io.github.al1gat0r.stocks")'
+omarchy plugin list --json | jq '.[] | select(.id == "io.github.5d0tal1gat0r.stocks")'
 ```
-Expected: the plugin appears with `enabled: true` (or equivalent) and a layout entry exists: `jq '.bar.layout.center' ~/.config/omarchy/shell.json` includes `{"id": "io.github.al1gat0r.stocks"}`.
+Expected: the plugin appears with `enabled: true` (or equivalent) and a layout entry exists: `jq '.bar.layout.center' ~/.config/omarchy/shell.json` includes `{"id": "io.github.5d0tal1gat0r.stocks"}`.
 
 If `add` refuses a bare path, use `file://~/omarchy-stocks`.
 
 - [ ] **Step 2: Watch the log while it loads**
 
 Run: `qs log -p /usr/share/omarchy/shell --tail 60 2>&1 | grep -i -E "stocks|error|warning" | tail -30`
-Expected: no `TypeError`, `ReferenceError`, or "Cannot assign" lines mentioning `io.github.al1gat0r.stocks`. Fix and re-sync (`rsync -a --delete --exclude .git ./ ~/.config/omarchy/plugins/io.github.al1gat0r.stocks/`) until clean.
+Expected: no `TypeError`, `ReferenceError`, or "Cannot assign" lines mentioning `io.github.5d0tal1gat0r.stocks`. Fix and re-sync (`rsync -a --delete --exclude .git ./ ~/.config/omarchy/plugins/io.github.5d0tal1gat0r.stocks/`) until clean.
 
 - [ ] **Step 3: Exercise the panel lifecycle over IPC**
 
 Run:
 ```bash
-omarchy-shell shell summon io.github.al1gat0r.stocks '{}'; sleep 2
+omarchy-shell shell summon io.github.5d0tal1gat0r.stocks '{}'; sleep 2
 grim -o "$(hyprctl monitors -j | jq -r '.[0].name')" /tmp/omarchy-stocks-dev/stocks-open.png
-omarchy-shell shell hide io.github.al1gat0r.stocks
-omarchy-shell io.github.al1gat0r.stocks refresh
-omarchy-shell io.github.al1gat0r.stocks next
+omarchy-shell shell hide io.github.5d0tal1gat0r.stocks
+omarchy-shell io.github.5d0tal1gat0r.stocks refresh
+omarchy-shell io.github.5d0tal1gat0r.stocks next
 ```
 Expected: `summon` returns `ok`; the screenshot shows the pill (e.g. `AAPL 305.59 ▼0.11%`) and the open panel with one row per symbol; `hide` closes it; `refresh`/`next` return without error. Inspect the screenshot with the Read tool.
 
@@ -1306,13 +1306,13 @@ Expected: `summon` returns `ok`; the screenshot shows the pill (e.g. `AAPL 305.5
 
 Run:
 ```bash
-omarchy bar set io.github.al1gat0r.stocks symbols '["SPY","QQQ","NOPE_XYZ"]' --json; sleep 4
-omarchy-shell shell summon io.github.al1gat0r.stocks '{}'; sleep 1
+omarchy bar set io.github.5d0tal1gat0r.stocks symbols '["SPY","QQQ","NOPE_XYZ"]' --json; sleep 4
+omarchy-shell shell summon io.github.5d0tal1gat0r.stocks '{}'; sleep 1
 grim -o "$(hyprctl monitors -j | jq -r '.[0].name')" /tmp/omarchy-stocks-dev/stocks-settings.png
-omarchy-shell shell hide io.github.al1gat0r.stocks
-omarchy bar set io.github.al1gat0r.stocks compact true --json
-omarchy bar set io.github.al1gat0r.stocks symbols '["AAPL","NVDA","SPCX","GOOGL"]' --json
-omarchy bar set io.github.al1gat0r.stocks compact false --json
+omarchy-shell shell hide io.github.5d0tal1gat0r.stocks
+omarchy bar set io.github.5d0tal1gat0r.stocks compact true --json
+omarchy bar set io.github.5d0tal1gat0r.stocks symbols '["AAPL","NVDA","SPCX","GOOGL"]' --json
+omarchy bar set io.github.5d0tal1gat0r.stocks compact false --json
 ```
 Expected: the screenshot shows SPY/QQQ rows with prices and a muted `NOPE_XYZ  Not Found` row; the pill never shows NOPE_XYZ; the compact toggle drops the price from the pill; the last two commands restore the defaults.
 
@@ -1340,12 +1340,12 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Create: `README.md`
 - Create: `LICENSE`
 
-- [ ] **Step 1: Write `LICENSE`** (MIT, year 2026, holder `al1gat0r`)
+- [ ] **Step 1: Write `LICENSE`** (MIT, year 2026, holder `5d0tal1gat0r`)
 
 ```
 MIT License
 
-Copyright (c) 2026 al1gat0r
+Copyright (c) 2026 5d0tal1gat0r
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -1381,13 +1381,13 @@ Quotes come from Yahoo Finance — no API key.
 ## Install
 
 ```sh
-omarchy plugin add https://github.com/al1gat0r/omarchy-stocks.git --enable
+omarchy plugin add https://github.com/5d0tal1gat0r/omarchy-stocks.git --enable
 ```
 
 The widget lands in the bar's center section. Move it with:
 
 ```sh
-omarchy bar move io.github.al1gat0r.stocks --section right
+omarchy bar move io.github.5d0tal1gat0r.stocks --section right
 ```
 
 ## Usage
@@ -1399,7 +1399,7 @@ omarchy bar move io.github.al1gat0r.stocks --section right
 | right click / scroll | show the next / previous symbol |
 | click a row in the panel | open the symbol on finance.yahoo.com |
 
-IPC (for keybindings): `omarchy-shell io.github.al1gat0r.stocks toggle|refresh|next|prev`
+IPC (for keybindings): `omarchy-shell io.github.5d0tal1gat0r.stocks toggle|refresh|next|prev`
 
 ## Configure
 
@@ -1407,10 +1407,10 @@ Settings live on the widget's entry in `~/.config/omarchy/shell.json` and apply
 instantly:
 
 ```sh
-omarchy bar set io.github.al1gat0r.stocks symbols '["AAPL","MSFT","BTC-USD","^GSPC"]' --json
-omarchy bar set io.github.al1gat0r.stocks refreshMinutes 2
-omarchy bar set io.github.al1gat0r.stocks cycleSeconds 15     # 0 pins the first symbol
-omarchy bar set io.github.al1gat0r.stocks compact true --json # "AAPL ▲0.42%" without the price
+omarchy bar set io.github.5d0tal1gat0r.stocks symbols '["AAPL","MSFT","BTC-USD","^GSPC"]' --json
+omarchy bar set io.github.5d0tal1gat0r.stocks refreshMinutes 2
+omarchy bar set io.github.5d0tal1gat0r.stocks cycleSeconds 15     # 0 pins the first symbol
+omarchy bar set io.github.5d0tal1gat0r.stocks compact true --json # "AAPL ▲0.42%" without the price
 ```
 
 | key | default | meaning |
@@ -1425,20 +1425,20 @@ Unknown symbols show as `Not Found` in the panel and are skipped by the pill.
 ## Develop
 
 ```sh
-git clone https://github.com/al1gat0r/omarchy-stocks.git
+git clone https://github.com/5d0tal1gat0r/omarchy-stocks.git
 cd omarchy-stocks
 node --test test/                                          # Model.js unit tests
 qmllint -I /usr/share/omarchy/shell BarWidget.qml Panel.qml
 omarchy plugin validate "$PWD"
 omarchy plugin add "$PWD" --enable                         # installs a clone into ~/.config/omarchy/plugins/
-rsync -a --delete --exclude .git ./ ~/.config/omarchy/plugins/io.github.al1gat0r.stocks/   # hot-reload your edits
+rsync -a --delete --exclude .git ./ ~/.config/omarchy/plugins/io.github.5d0tal1gat0r.stocks/   # hot-reload your edits
 qs log -p /usr/share/omarchy/shell --tail 100              # shell log
 ```
 
 ## Remove
 
 ```sh
-omarchy plugin remove io.github.al1gat0r.stocks
+omarchy plugin remove io.github.5d0tal1gat0r.stocks
 ```
 
 ## License
@@ -1462,8 +1462,8 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 Run:
 ```bash
-omarchy plugin update io.github.al1gat0r.stocks --yes || rsync -a --delete --exclude .git ./ ~/.config/omarchy/plugins/io.github.al1gat0r.stocks/
-omarchy plugin list --json | jq '.[] | select(.id == "io.github.al1gat0r.stocks") | {id, version, enabled}'
+omarchy plugin update io.github.5d0tal1gat0r.stocks --yes || rsync -a --delete --exclude .git ./ ~/.config/omarchy/plugins/io.github.5d0tal1gat0r.stocks/
+omarchy plugin list --json | jq '.[] | select(.id == "io.github.5d0tal1gat0r.stocks") | {id, version, enabled}'
 ```
 Expected: installed version `0.1.0`, enabled.
 
@@ -1503,14 +1503,14 @@ and verification.
 - Verify: renamed-copy lint of the file minus the IpcHandler block exits 0; `omarchy plugin validate` exit 0. Commit.
 
 ### Task 11: Live install + verification (re-run of Task 6 with v2 checks)
-- Sync the installed clone (`git -C ~/.config/omarchy/plugins/io.github.al1gat0r.stocks pull`), `omarchy-shell shell rescanPlugins`, `omarchy plugin enable io.github.al1gat0r.stocks`.
-- Screenshot the tape and the open panel; exercise `omarchy-shell shell summon/hide`, `omarchy-shell io.github.al1gat0r.stocks refresh|pause`, range chip click via `omarchy bar set … chartRange 1mo`, symbols round-trip incl. a bad symbol; check `qs log` for plugin errors. Save `preview.png`. Commit.
+- Sync the installed clone (`git -C ~/.config/omarchy/plugins/io.github.5d0tal1gat0r.stocks pull`), `omarchy-shell shell rescanPlugins`, `omarchy plugin enable io.github.5d0tal1gat0r.stocks`.
+- Screenshot the tape and the open panel; exercise `omarchy-shell shell summon/hide`, `omarchy-shell io.github.5d0tal1gat0r.stocks refresh|pause`, range chip click via `omarchy bar set … chartRange 1mo`, symbols round-trip incl. a bad symbol; check `qs log` for plugin errors. Save `preview.png`. Commit.
 
 ### Task 12: README/LICENSE (re-run of Task 7 with v2 settings table: `symbols`, `refreshMinutes`, `compact`, `tickerWidth`, `scrollSpeed`, `chartRange`) and merge to `main`.
 
 ## Revision 3 — colors, size, currency (executed inline)
-- Task 13: Model — `normalizeColor`, `parseThemeColor`, `isUp`, tape `up` flag, defaults 180/20 (tests updated). Commit `7ee0e3f`.
-- Task 14: Panel/BarWidget — theme colors via `FileView` on `colors.toml`, `trendColor`/`directionColor`, `TapeRun` component with neutral separators, panel width 500. Commit `8f5ac72`.
-- Task 15: Model — currency helpers (`normalizeCurrency`, `normalizeCurrencies`, `currencyCycle`, `quoteCurrency`, `ratePairs`, `parseRateLines`, `rateFor`, `convertSeries`, `convertQuote`, `convertAll`) with tests. Commit `9f29b56`.
-- Task 16: Panel — `shownQuotes`, rates `Process` + retry, currency chip, `selectCurrency` persistence, converted chart series. Commit `58067a1`.
+- Task 13: Model — `normalizeColor`, `parseThemeColor`, `isUp`, tape `up` flag, defaults 180/20 (tests updated).
+- Task 14: Panel/BarWidget — theme colors via `FileView` on `colors.toml`, `trendColor`/`directionColor`, `TapeRun` component with neutral separators, panel width 500.
+- Task 15: Model — currency helpers (`normalizeCurrency`, `normalizeCurrencies`, `currencyCycle`, `quoteCurrency`, `ratePairs`, `parseRateLines`, `rateFor`, `convertSeries`, `convertQuote`, `convertAll`) with tests.
+- Task 16: Panel — `shownQuotes`, rates `Process` + retry, currency chip, `selectCurrency` persistence, converted chart series.
 - Verification (live, after `omarchy restart shell`): tape 180 px, green/red items, `Native ⇄` → 305.59 and `GBP ⇄` → 225.92 with the tape following; panel stays open ≥ 9 s after summon; range chips switch in place.

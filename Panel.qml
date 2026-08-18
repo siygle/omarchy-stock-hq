@@ -10,7 +10,7 @@ import "Model.js" as Model
 // `tapeItems` / `label` into the bar (same split as omarchy.weather).
 Panel {
   id: root
-  moduleName: "io.github.al1gat0r.stocks"
+  moduleName: "io.github.5d0tal1gat0r.stocks"
   // The bar entry (BarWidget.qml) owns the IPC target; see its IpcHandler.
   manageIpc: false
 
