@@ -10,6 +10,17 @@ test("normalizeSymbols: comma/space separated strings work (omarchy bar set with
   assert.deepEqual(Model.normalizeSymbols("aapl, nvda spcx;googl"), ["AAPL", "NVDA", "SPCX", "GOOGL"])
 })
 
+test("normalizeSymbol: Asian market shortcuts map to Yahoo Finance symbols", () => {
+  assert.equal(Model.normalizeSymbol("TW:2330"), "2330.TW")
+  assert.equal(Model.normalizeSymbol("tw2330"), "2330.TW")
+  assert.equal(Model.normalizeSymbol("TWO:6488"), "6488.TWO")
+  assert.equal(Model.normalizeSymbol("HK:0700"), "0700.HK")
+  assert.equal(Model.normalizeSymbol("JP:7203"), "7203.T")
+  assert.equal(Model.normalizeSymbol("KR:005930"), "005930.KS")
+  assert.equal(Model.normalizeSymbol("SZ:000001"), "000001.SZ")
+  assert.equal(Model.normalizeSymbol("2330.TW"), "2330.TW")
+})
+
 test("normalizeSymbols: empty or junk input falls back to the defaults", () => {
   assert.deepEqual(Model.normalizeSymbols(null), Model.DEFAULT_SYMBOLS)
   assert.deepEqual(Model.normalizeSymbols([]), Model.DEFAULT_SYMBOLS)
@@ -22,6 +33,18 @@ test("normalizeSymbols: returns a copy, never the shared default array", () => {
   const a = Model.normalizeSymbols(null)
   a.push("X")
   assert.deepEqual(Model.normalizeSymbols(null), Model.DEFAULT_SYMBOLS)
+})
+
+test("normalizeWatchlists: supports multiple lists and falls back to legacy symbols", () => {
+  assert.deepEqual(Model.normalizeWatchlists([{ name: "US", symbols: ["aapl"] }, { name: "TW", symbols: ["TW:2330", ""] }]), [
+    { name: "US", symbols: ["AAPL"] },
+    { name: "TW", symbols: ["2330.TW"] }
+  ])
+  assert.deepEqual(Model.normalizeWatchlists(null, ["msft"]), [{ name: "Main", symbols: ["MSFT"] }])
+  assert.equal(Model.activeWatchlistIndex(1, [{}, {}]), 1)
+  assert.equal(Model.activeWatchlistIndex(4, [{}, {}]), 0)
+  const cloned = Model.cloneWatchlists([{ name: "TW", symbols: ["tw2330"] }])
+  assert.deepEqual(cloned, [{ name: "TW", symbols: ["2330.TW"] }])
 })
 
 test("refreshMinutes: clamps to >= 1, non-numeric falls back", () => {

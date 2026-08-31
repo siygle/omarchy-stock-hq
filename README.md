@@ -2,8 +2,9 @@
 
 A Wall-Street-style ticker tape for the Omarchy Quattro bar. The tape scrolls
 your symbols (`AAPL 305.59 ▲0.42%  •  NVDA …`) in the theme's green/red; click
-it for a panel with sparklines, a detail chart with range selector, key stats
-and a currency switch. Quotes and FX rates come from Yahoo Finance — no API key.
+it for a panel with sparklines, a detail chart with range selector, key stats,
+watchlists, inline add/edit/delete, and a currency switch. Quotes and FX rates
+come from Yahoo Finance — no API key.
 
 ![preview](preview.png)
 
@@ -29,6 +30,9 @@ omarchy bar move io.github.5d0tal1gat0r.stocks --section right
 | panel | `1D 5D 1M 6M 1Y` | chart range (persisted) |
 | panel | `USD ⇄` chip | left click: next currency · right click: previous · `Native` = each quote in its own currency |
 | panel | click a row | show that symbol's chart and stats |
+| panel | `+ Symbol`, `Edit`, `×` | add, edit, or delete symbols directly |
+| panel | watchlist chips / `+ Watchlist` | switch lists or create another list |
+| panel | list name field / `Delete list` | rename or remove the active watchlist |
 | panel | `Open on Yahoo Finance ↗` | open the selected symbol in your browser |
 
 IPC (for keybindings): `omarchy-shell io.github.5d0tal1gat0r.stocks toggle|open|close|refresh|pause`
@@ -48,7 +52,9 @@ omarchy bar set io.github.5d0tal1gat0r.stocks compact true --json    # "AAPL ▲
 
 | key | default | meaning |
 |-----|---------|---------|
-| `symbols` | `["AAPL","NVDA","SPCX","GOOGL"]` | any Yahoo Finance symbols (stocks, ETFs, `BTC-USD`, `EURUSD=X`, `^GSPC`); a comma-separated string also works |
+| `symbols` | `["AAPL","NVDA","SPCX","GOOGL"]` | legacy/default watchlist symbols; any Yahoo Finance symbols (stocks, ETFs, `BTC-USD`, `EURUSD=X`, `^GSPC`, `2330.TW`); a comma-separated string also works |
+| `watchlists` | derived from `symbols` | multiple lists, e.g. `[{"name":"US","symbols":["AAPL"]},{"name":"Taiwan","symbols":["TW:2330","0050.TW"]}]` |
+| `activeWatchlist` | `0` | selected list index |
 | `refreshMinutes` | `5` | quote refresh interval (minimum 1) |
 | `tickerWidth` | `180` | tape width in px (minimum 80) |
 | `scrollSpeed` | `20` | tape speed in px/s; `0` = static |
@@ -59,8 +65,12 @@ omarchy bar set io.github.5d0tal1gat0r.stocks compact true --json    # "AAPL ▲
 | `upColor` / `downColor` | theme `green` / `red` | override the tints with a hex color, e.g. `"#a6e3a1"` |
 
 Unknown symbols show as `Not Found` in the panel and are left out of the tape.
-Colors follow the current theme's `colors.toml`; themes without a `green` get a
-neutral fallback.
+Yahoo's free chart endpoint is used for Taiwan/Asia too. Native Yahoo symbols
+work (`2330.TW`, `6488.TWO`, `0700.HK`, `7203.T`, `005930.KS`) and the panel
+also accepts shortcuts like `TW:2330`, `TWO:6488`, `HK:0700`, `JP:7203`,
+`KR:005930`, `SH:600519`, `SZ:000001`, `SG:D05`, and `AU:BHP`. Colors follow
+the current theme's `colors.toml`; themes without a `green` get a neutral
+fallback.
 
 ## Develop
 

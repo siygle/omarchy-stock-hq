@@ -5,6 +5,25 @@
 
 var DEFAULT_SYMBOLS = ["AAPL", "NVDA", "SPCX", "GOOGL"]
 
+// Free quote source: Yahoo Finance's chart endpoint already covers many Asian
+// markets. Users may enter native Yahoo symbols (2330.TW, 0700.HK, 7203.T) or
+// friendlier market-prefixed forms below.
+var ASIA_MARKET_SUFFIXES = {
+  "TW": ".TW", "TPE": ".TW",       // Taiwan Stock Exchange, e.g. TW:2330 -> 2330.TW
+  "TWO": ".TWO", "TPEX": ".TWO",   // Taipei Exchange, e.g. TWO:6488 -> 6488.TWO
+  "HK": ".HK", "HKG": ".HK",       // Hong Kong, e.g. HK:0700 -> 0700.HK
+  "JP": ".T", "TYO": ".T",         // Tokyo, e.g. JP:7203 -> 7203.T
+  "KS": ".KS", "KR": ".KS",        // Korea Stock Exchange, e.g. KR:005930 -> 005930.KS
+  "KQ": ".KQ",                       // KOSDAQ
+  "SS": ".SS", "SH": ".SS",        // Shanghai
+  "SZ": ".SZ",                       // Shenzhen
+  "SI": ".SI", "SG": ".SI",        // Singapore
+  "BK": ".BK", "TH": ".BK",        // Thailand
+  "JK": ".JK", "ID": ".JK",        // Indonesia
+  "KL": ".KL", "MY": ".KL",        // Malaysia
+  "AX": ".AX", "AU": ".AX"         // Australia
+}
+
 function trimString(value) {
   return String(value === undefined || value === null ? "" : value).replace(/^\s+|\s+$/g, "")
 }
@@ -12,8 +31,25 @@ function trimString(value) {
 // Accepts a JSON array (the documented form) or a comma/space/semicolon
 // separated string (what `omarchy bar set ... symbols AAPL,NVDA` stores when
 // --json is forgotten). Anything else, or an empty result, means the defaults.
-function normalizeSymbols(value, fallback) {
-  var defaults = fallback || DEFAULT_SYMBOLS
+function normalizeSymbol(value) {
+  var symbol = trimString(value).toUpperCase()
+  if (symbol === "") return ""
+
+  // TW:2330 / HK:0700 / JP:7203 etc. -> Yahoo suffixes.
+  var prefixed = symbol.match(/^([A-Z]+)[:/](.+)$/)
+  if (prefixed && ASIA_MARKET_SUFFIXES[prefixed[1]]) {
+    var code = prefixed[2].replace(/\s+/g, "")
+    if (code !== "") return code + ASIA_MARKET_SUFFIXES[prefixed[1]]
+  }
+
+  // Common Taiwan shorthand: tw2330 / tw-2330 / tw.2330 -> 2330.TW.
+  var tw = symbol.match(/^TW[.\-_ ]?([0-9A-Z]+)$/)
+  if (tw) return tw[1] + ".TW"
+
+  return symbol
+}
+
+function listFromValue(value) {
   var list = []
   if (Array.isArray(value)) {
     list = value
@@ -22,14 +58,50 @@ function normalizeSymbols(value, fallback) {
   } else if (value && typeof value === "object" && typeof value.length === "number") {
     for (var k = 0; k < value.length; k++) list.push(value[k])
   }
+  return list
+}
 
+function normalizeSymbols(value, fallback) {
+  var defaults = fallback || DEFAULT_SYMBOLS
+  var list = listFromValue(value)
   var out = []
   for (var i = 0; i < list.length; i++) {
-    var symbol = trimString(list[i]).toUpperCase()
+    var symbol = normalizeSymbol(list[i])
     if (symbol === "" || out.indexOf(symbol) !== -1) continue
     out.push(symbol)
   }
   return out.length ? out : defaults.slice()
+}
+
+var DEFAULT_WATCHLIST_NAME = "Main"
+
+function normalizeWatchlists(value, fallbackSymbols) {
+  var out = []
+  if (Array.isArray(value)) {
+    for (var i = 0; i < value.length; i++) {
+      var item = value[i] || {}
+      var name = trimString(item.name || item.label || ("List " + (i + 1)))
+      var symbols = normalizeSymbols(item.symbols, [])
+      if (symbols.length) out.push({ name: name || ("List " + (i + 1)), symbols: symbols })
+    }
+  }
+  if (out.length) return out
+  return [{ name: DEFAULT_WATCHLIST_NAME, symbols: normalizeSymbols(fallbackSymbols, DEFAULT_SYMBOLS) }]
+}
+
+function activeWatchlistIndex(value, watchlists) {
+  var list = watchlists || []
+  if (!list.length) return 0
+  var n = parseInt(String(value), 10)
+  if (isNaN(n) || n < 0 || n >= list.length) return 0
+  return n
+}
+
+function cloneWatchlists(watchlists) {
+  var list = watchlists || []
+  var out = []
+  for (var i = 0; i < list.length; i++) out.push({ name: String(list[i].name || ("List " + (i + 1))), symbols: normalizeSymbols(list[i].symbols, []) })
+  return out
 }
 
 function refreshMinutes(value, fallback) {
@@ -603,7 +675,12 @@ function convertAll(quotes, display, rates) {
 if (typeof module !== "undefined") {
   module.exports = {
     DEFAULT_SYMBOLS: DEFAULT_SYMBOLS,
+    ASIA_MARKET_SUFFIXES: ASIA_MARKET_SUFFIXES,
+    normalizeSymbol: normalizeSymbol,
     normalizeSymbols: normalizeSymbols,
+    normalizeWatchlists: normalizeWatchlists,
+    activeWatchlistIndex: activeWatchlistIndex,
+    cloneWatchlists: cloneWatchlists,
     refreshMinutes: refreshMinutes,
     cycleSeconds: cycleSeconds,
     chartUrl: chartUrl,

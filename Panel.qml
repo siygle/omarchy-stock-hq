@@ -21,8 +21,11 @@ Panel {
   readonly property var barIdentity: hostWidget || root
 
   // ---- Settings (inline on this widget's shell.json entry).
-  readonly property var symbols: Model.normalizeSymbols(setting("symbols", null))
-  readonly property string symbolsKey: symbols.join(",")
+  readonly property var watchlists: Model.normalizeWatchlists(setting("watchlists", null), setting("symbols", null))
+  readonly property int activeWatchlist: Model.activeWatchlistIndex(setting("activeWatchlist", 0), watchlists)
+  readonly property var activeList: watchlists[activeWatchlist] || { name: "Main", symbols: Model.DEFAULT_SYMBOLS }
+  readonly property var symbols: activeList.symbols
+  readonly property string symbolsKey: activeWatchlist + ":" + symbols.join(",")
   readonly property int refreshMinutes: Model.refreshMinutes(setting("refreshMinutes", 5))
   readonly property bool compact: setting("compact", false) === true || String(setting("compact", false)) === "true"
   readonly property string activeRange: Model.chartRange(setting("chartRange", "1d"))
@@ -38,6 +41,11 @@ Panel {
   property var lastUpdated: null
   property int retries: 0
   property int selectedIndex: 0
+
+  // ---- Inline watchlist/symbol editor state.
+  property bool editorOpen: false
+  property int editingIndex: -1
+  property string symbolDraft: ""
 
   // ---- Chart-series cache for the active range when it is not 1d (the 1d
   //      series rides along with every quote fetch).
@@ -200,15 +208,19 @@ Panel {
     rates = merged
   }
 
-  function selectCurrency(step) {
-    var next = Model.currencyCycle(displayCurrency, currencies, step)
-    if (next === displayCurrency) return
+  function updateSettings(patch) {
     var entry = { id: root.moduleName }
     for (var key in root.settings) if (key !== "id") entry[key] = root.settings[key]
-    entry.currency = next
+    for (var p in patch) entry[p] = patch[p]
     root.settings = entry
     if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
       root.bar.shell.updateEntryInline(root.moduleName, entry)
+  }
+
+  function selectCurrency(step) {
+    var next = Model.currencyCycle(displayCurrency, currencies, step)
+    if (next === displayCurrency) return
+    updateSettings({ currency: next })
   }
 
   function currencyLabel(quote) {
@@ -263,12 +275,79 @@ Panel {
   function selectRange(range) {
     var next = Model.chartRange(range)
     if (next === activeRange) return
-    var entry = { id: root.moduleName }
-    for (var key in root.settings) if (key !== "id") entry[key] = root.settings[key]
-    entry.chartRange = next
-    root.settings = entry
-    if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
-      root.bar.shell.updateEntryInline(root.moduleName, entry)
+    updateSettings({ chartRange: next })
+  }
+
+  function selectWatchlist(index) {
+    if (index === activeWatchlist || index < 0 || index >= watchlists.length) return
+    updateSettings({ activeWatchlist: index })
+  }
+
+  function persistWatchlists(nextLists, nextActive) {
+    updateSettings({ watchlists: nextLists, activeWatchlist: nextActive })
+  }
+
+  function beginAddSymbol() {
+    editorOpen = true
+    editingIndex = -1
+    symbolDraft = ""
+    Qt.callLater(function() { if (symbolField) symbolField.forceActiveFocus() })
+  }
+
+  function beginEditSymbol(index) {
+    if (index < 0 || index >= symbols.length) return
+    editorOpen = true
+    editingIndex = index
+    symbolDraft = symbols[index]
+    Qt.callLater(function() { if (symbolField) { symbolField.forceActiveFocus(); symbolField.selectAll() } })
+  }
+
+  function saveSymbolDraft() {
+    var symbol = Model.normalizeSymbol(symbolDraft)
+    if (symbol === "") return
+    var lists = Model.cloneWatchlists(watchlists)
+    var list = lists[activeWatchlist]
+    if (!list) return
+    var existing = list.symbols.indexOf(symbol)
+    if (editingIndex >= 0) {
+      if (existing >= 0 && existing !== editingIndex) list.symbols.splice(editingIndex, 1)
+      else list.symbols[editingIndex] = symbol
+    } else if (existing < 0) {
+      list.symbols.push(symbol)
+    }
+    editorOpen = false
+    persistWatchlists(lists, activeWatchlist)
+  }
+
+  function deleteSymbol(index) {
+    var lists = Model.cloneWatchlists(watchlists)
+    var list = lists[activeWatchlist]
+    if (!list || index < 0 || index >= list.symbols.length) return
+    list.symbols.splice(index, 1)
+    if (!list.symbols.length) list.symbols.push(Model.DEFAULT_SYMBOLS[0])
+    persistWatchlists(lists, activeWatchlist)
+  }
+
+  function beginAddWatchlist() {
+    var lists = Model.cloneWatchlists(watchlists)
+    lists.push({ name: "List " + (lists.length + 1), symbols: ["2330.TW", "0050.TW", "0700.HK", "7203.T"] })
+    persistWatchlists(lists, lists.length - 1)
+  }
+
+  function renameActiveWatchlist(name) {
+    var clean = String(name || "").trim()
+    if (clean === "") return
+    var lists = Model.cloneWatchlists(watchlists)
+    if (!lists[activeWatchlist]) return
+    lists[activeWatchlist].name = clean
+    persistWatchlists(lists, activeWatchlist)
+  }
+
+  function deleteActiveWatchlist() {
+    if (watchlists.length <= 1) return
+    var lists = Model.cloneWatchlists(watchlists)
+    lists.splice(activeWatchlist, 1)
+    persistWatchlists(lists, Math.max(0, activeWatchlist - 1))
   }
 
   function selectQuote(index) {
@@ -456,7 +535,7 @@ Panel {
         width: parent.width
         spacing: Style.space(8)
 
-        // ---- Header: title, range chips, freshness.
+        // ---- Header: title, watchlists, range chips, freshness.
         Item {
           width: parent.width
           height: Math.max(headerTitle.implicitHeight, chips.implicitHeight)
@@ -466,7 +545,7 @@ Panel {
             anchors.left: parent.left
             anchors.leftMargin: Style.space(8)
             anchors.verticalCenter: parent.verticalCenter
-            text: "Stocks"
+            text: "Stocks · " + root.activeList.name
             color: root.barForeground
             font.family: root.fontFamily
             font.pixelSize: Style.font.subtitle
@@ -560,7 +639,171 @@ Panel {
           }
         }
 
+        // ---- Watchlist switcher and inline list editor.
+        Row {
+          width: parent.width - Style.space(16)
+          x: Style.space(8)
+          spacing: Style.space(4)
+
+          Repeater {
+            model: root.watchlists
+
+            Rectangle {
+              id: listChip
+              required property var modelData
+              required property int index
+              readonly property bool selected: index === root.activeWatchlist
+              width: listText.implicitWidth + Style.space(12)
+              height: listText.implicitHeight + Style.space(6)
+              radius: Style.cornerRadius
+              color: listChip.selected
+                ? Style.selectedFillFor(root.barForeground, Color.accent)
+                : (listMouse.containsMouse ? Style.hoverFillFor(root.barForeground, Color.accent) : "transparent")
+
+              Text {
+                id: listText
+                anchors.centerIn: parent
+                text: listChip.modelData.name
+                color: listChip.selected ? root.barForeground : root.mutedForeground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                font.bold: listChip.selected
+              }
+
+              MouseArea {
+                id: listMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.selectWatchlist(listChip.index)
+              }
+            }
+          }
+
+          Rectangle {
+            width: addListText.implicitWidth + Style.space(12)
+            height: addListText.implicitHeight + Style.space(6)
+            radius: Style.cornerRadius
+            color: addListMouse.containsMouse ? Style.hoverFillFor(root.barForeground, Color.accent) : "transparent"
+            Text {
+              id: addListText
+              anchors.centerIn: parent
+              text: "+ Watchlist"
+              color: root.mutedForeground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+            MouseArea {
+              id: addListMouse
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.beginAddWatchlist()
+            }
+          }
+
+          TextField {
+            id: listNameField
+            width: Style.space(110)
+            text: root.activeList.name
+            foreground: root.barForeground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            verticalPadding: Style.space(2)
+            placeholderText: "List name"
+            onAccepted: root.renameActiveWatchlist(text)
+            onEditingFinished: root.renameActiveWatchlist(text)
+          }
+
+          Rectangle {
+            visible: root.watchlists.length > 1
+            width: delListText.implicitWidth + Style.space(10)
+            height: delListText.implicitHeight + Style.space(6)
+            radius: Style.cornerRadius
+            color: delListMouse.containsMouse ? Style.hoverFillFor(root.barForeground, Color.accent) : "transparent"
+            Text {
+              id: delListText
+              anchors.centerIn: parent
+              text: "Delete list"
+              color: root.urgentForeground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+            MouseArea {
+              id: delListMouse
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.deleteActiveWatchlist()
+            }
+          }
+        }
+
         PanelSeparator { foreground: root.barForeground }
+
+        Row {
+          width: parent.width - Style.space(16)
+          x: Style.space(8)
+          spacing: Style.space(6)
+
+          TextField {
+            id: symbolField
+            width: Style.space(160)
+            text: root.symbolDraft
+            visible: root.editorOpen
+            foreground: root.barForeground
+            placeholderText: "TW:2330, 0700.HK, AAPL"
+            verticalPadding: Style.space(3)
+            onTextChanged: root.symbolDraft = text
+            onAccepted: root.saveSymbolDraft()
+          }
+
+          Rectangle {
+            width: symbolActionText.implicitWidth + Style.space(12)
+            height: symbolActionText.implicitHeight + Style.space(6)
+            radius: Style.cornerRadius
+            color: symbolActionMouse.containsMouse ? Style.hoverFillFor(root.barForeground, Color.accent) : "transparent"
+            Text {
+              id: symbolActionText
+              anchors.centerIn: parent
+              text: root.editorOpen ? (root.editingIndex >= 0 ? "Save" : "Add") : "+ Symbol"
+              color: root.barForeground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: true
+            }
+            MouseArea {
+              id: symbolActionMouse
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.editorOpen ? root.saveSymbolDraft() : root.beginAddSymbol()
+            }
+          }
+
+          Text {
+            visible: root.editorOpen
+            text: "Cancel"
+            color: cancelMouse.containsMouse ? root.barForeground : root.mutedForeground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            MouseArea {
+              id: cancelMouse
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.editorOpen = false
+            }
+          }
+
+          Text {
+            text: "Asia shortcuts: TW:2330, TWO:6488, HK:0700, JP:7203, KR:005930"
+            color: root.mutedForeground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
+          }
+        }
 
         // ---- One row per symbol: SYM · name · sparkline · price · change.
         Column {
@@ -644,7 +887,7 @@ Panel {
 
               Text {
                 id: changeText
-                anchors.right: parent.right
+                anchors.right: editText.left
                 anchors.rightMargin: Style.space(8)
                 anchors.verticalCenter: parent.verticalCenter
                 width: Style.space(112)
@@ -655,9 +898,49 @@ Panel {
                 font.pixelSize: Style.font.body
               }
 
+              Text {
+                id: editText
+                anchors.right: deleteText.left
+                anchors.rightMargin: Style.space(8)
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Edit"
+                color: editMouse.containsMouse ? root.barForeground : root.mutedForeground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                MouseArea {
+                  id: editMouse
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.beginEditSymbol(row.index)
+                }
+              }
+
+              Text {
+                id: deleteText
+                anchors.right: parent.right
+                anchors.rightMargin: Style.space(8)
+                anchors.verticalCenter: parent.verticalCenter
+                text: "×"
+                color: deleteMouse.containsMouse ? root.urgentForeground : root.mutedForeground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                font.bold: true
+                MouseArea {
+                  id: deleteMouse
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.deleteSymbol(row.index)
+                }
+              }
+
               MouseArea {
                 id: rowMouse
-                anchors.fill: parent
+                anchors.left: parent.left
+                anchors.right: changeText.right
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
                 hoverEnabled: true
                 cursorShape: row.valid ? Qt.PointingHandCursor : Qt.ArrowCursor
                 onClicked: root.selectQuote(row.index)
