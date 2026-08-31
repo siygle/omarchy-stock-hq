@@ -77,13 +77,12 @@ var DEFAULT_WATCHLIST_NAME = "Main"
 
 function normalizeWatchlists(value, fallbackSymbols) {
   var out = []
-  if (Array.isArray(value)) {
-    for (var i = 0; i < value.length; i++) {
-      var item = value[i] || {}
-      var name = trimString(item.name || item.label || ("List " + (i + 1)))
-      var symbols = normalizeSymbols(item.symbols, [])
-      if (symbols.length) out.push({ name: name || ("List " + (i + 1)), symbols: symbols })
-    }
+  var list = listFromValue(value)
+  for (var i = 0; i < list.length; i++) {
+    var item = list[i] || {}
+    var name = trimString(item.name || item.label || ("List " + (i + 1)))
+    var symbols = normalizeSymbols(item.symbols, [])
+    if (symbols.length) out.push({ name: name || ("List " + (i + 1)), symbols: symbols })
   }
   if (out.length) return out
   return [{ name: DEFAULT_WATCHLIST_NAME, symbols: normalizeSymbols(fallbackSymbols, DEFAULT_SYMBOLS) }]
@@ -200,22 +199,54 @@ function emptyQuote(symbol, error) {
     open: null,
     volume: null,
     series: [],
+    candles: [],
     error: String(error || "")
   }
+}
+
+function quoteBlock(result) {
+  return result && result.indicators && result.indicators.quote ? result.indicators.quote[0] : null
 }
 
 // timestamp[] + indicators.quote[0].close[] -> [{t, c}], nulls skipped
 // (Yahoo leaves the in-progress bar and market holidays as null).
 function parseSeries(result) {
   var stamps = result && result.timestamp ? result.timestamp : []
-  var quoteBlock = result && result.indicators && result.indicators.quote ? result.indicators.quote[0] : null
-  var closes = quoteBlock && quoteBlock.close ? quoteBlock.close : []
+  var block = quoteBlock(result)
+  var closes = block && block.close ? block.close : []
   var out = []
   for (var i = 0; i < stamps.length && i < closes.length; i++) {
     var t = toNumber(stamps[i])
     var c = toNumber(closes[i])
     if (t === null || c === null) continue
     out.push({ t: t, c: c })
+  }
+  return out
+}
+
+// Full OHLCV candles for technical analysis. Keeps rows where at least close is
+// known; high/low/open/volume may be null on sparse provider responses.
+function parseCandles(result) {
+  var stamps = result && result.timestamp ? result.timestamp : []
+  var block = quoteBlock(result)
+  var opens = block && block.open ? block.open : []
+  var highs = block && block.high ? block.high : []
+  var lows = block && block.low ? block.low : []
+  var closes = block && block.close ? block.close : []
+  var volumes = block && block.volume ? block.volume : []
+  var out = []
+  for (var i = 0; i < stamps.length && i < closes.length; i++) {
+    var t = toNumber(stamps[i])
+    var c = toNumber(closes[i])
+    if (t === null || c === null) continue
+    out.push({
+      t: t,
+      o: toNumber(opens[i]),
+      h: toNumber(highs[i]),
+      l: toNumber(lows[i]),
+      c: c,
+      v: toNumber(volumes[i])
+    })
   }
   return out
 }
@@ -277,6 +308,7 @@ function parseChartResponse(line) {
   quote.open = firstOpen(result)
   quote.volume = toNumber(meta.regularMarketVolume)
   quote.series = parseSeries(result)
+  quote.candles = parseCandles(result)
   return quote
 }
 
@@ -335,6 +367,19 @@ function validCount(quotes) {
   var n = 0
   for (var i = 0; i < list.length; i++) if (isValid(list[i])) n++
   return n
+}
+
+function quoteRowsForSymbols(quotes, symbols, missingError) {
+  var rows = quotes || []
+  var syms = normalizeSymbols(symbols, [])
+  if (!syms.length) return rows
+  var bySymbol = {}
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i] && rows[i].symbol) bySymbol[String(rows[i].symbol).toUpperCase()] = rows[i]
+  }
+  var out = []
+  for (var j = 0; j < syms.length; j++) out.push(bySymbol[syms[j]] || emptyQuote(syms[j], missingError || "No cached data"))
+  return out
 }
 
 function firstValidIndex(quotes) {
@@ -490,6 +535,121 @@ function valueToY(value, bounds, height, padding) {
   return scaleY(v, bounds, height, padding || 0)
 }
 
+// ---- Technical analysis MVP.
+
+function closeValues(series) {
+  var list = series || []
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var c = toNumber(list[i].c)
+    if (c !== null) out.push(c)
+  }
+  return out
+}
+
+function smaValue(values, period) {
+  var list = values || []
+  var p = parseInt(String(period), 10)
+  if (isNaN(p) || p <= 0 || list.length < p) return null
+  var sum = 0
+  for (var i = list.length - p; i < list.length; i++) sum += list[i]
+  return sum / p
+}
+
+function smaSeries(series, period) {
+  var list = series || []
+  var p = parseInt(String(period), 10)
+  if (isNaN(p) || p <= 0) return []
+  var out = []
+  var sum = 0
+  for (var i = 0; i < list.length; i++) {
+    sum += list[i].c
+    if (i >= p) sum -= list[i - p].c
+    if (i >= p - 1) out.push({ t: list[i].t, c: sum / p })
+  }
+  return out
+}
+
+function rsiValue(values, period) {
+  var list = values || []
+  var p = parseInt(String(period), 10) || 14
+  if (list.length <= p) return null
+  var gains = 0
+  var losses = 0
+  for (var i = list.length - p; i < list.length; i++) {
+    var diff = list[i] - list[i - 1]
+    if (diff >= 0) gains += diff
+    else losses += -diff
+  }
+  if (losses === 0) return gains === 0 ? 50 : 100
+  var rs = gains / losses
+  return 100 - (100 / (1 + rs))
+}
+
+function averageVolume(candles, period) {
+  var list = candles || []
+  var p = parseInt(String(period), 10) || 20
+  var sum = 0
+  var count = 0
+  for (var i = Math.max(0, list.length - p); i < list.length; i++) {
+    var v = toNumber(list[i].v)
+    if (v !== null) { sum += v; count++ }
+  }
+  return count ? sum / count : null
+}
+
+function supportResistance(series, lookback) {
+  var list = series || []
+  var n = parseInt(String(lookback), 10) || 30
+  if (list.length < 3) return { support: null, resistance: null }
+  var start = Math.max(0, list.length - n)
+  var support = list[start].c
+  var resistance = list[start].c
+  for (var i = start + 1; i < list.length; i++) {
+    if (list[i].c < support) support = list[i].c
+    if (list[i].c > resistance) resistance = list[i].c
+  }
+  return { support: support, resistance: resistance }
+}
+
+function technicalSummary(quote, series, candles) {
+  var s = series && series.length ? series : (quote && quote.series ? quote.series : [])
+  var c = candles && candles.length ? candles : (quote && quote.candles ? quote.candles : [])
+  if (!s || s.length < 2) return { available: false, lines: ["Not enough chart data for technical analysis yet."], sma20: null, sma50: null, rsi14: null, support: null, resistance: null }
+
+  var values = closeValues(s)
+  var last = values.length ? values[values.length - 1] : null
+  var first = values.length ? values[0] : null
+  var sma20 = smaValue(values, 20)
+  var sma50 = smaValue(values, 50)
+  var rsi14 = rsiValue(values, 14)
+  var sr = supportResistance(s, 30)
+  var avgVol = averageVolume(c, 20)
+  var lastVol = c.length ? toNumber(c[c.length - 1].v) : null
+  var movePct = first ? ((last - first) / first) * 100 : null
+
+  var lines = []
+  var name = quote && quote.symbol ? quote.symbol : "This symbol"
+  if (movePct !== null) {
+    var direction = movePct > 1 ? "uptrend" : (movePct < -1 ? "downtrend" : "sideways range")
+    var article = direction === "uptrend" ? "an" : "a"
+    lines.push(name + " is in " + article + " " + direction + " over the selected chart, moving " + (movePct >= 0 ? "+" : "") + movePct.toFixed(2) + "%.")
+  }
+  if (sma20 !== null) lines.push("Price is " + (last >= sma20 ? "above" : "below") + " SMA20 (" + formatPrice(sma20) + "), suggesting " + (last >= sma20 ? "positive" : "weak") + " short-term momentum.")
+  if (sma50 !== null) lines.push("SMA50 is " + formatPrice(sma50) + "; price is " + (last >= sma50 ? "above" : "below") + " it.")
+  if (rsi14 !== null) {
+    var rsiState = rsi14 >= 70 ? "overbought" : (rsi14 <= 30 ? "oversold" : (rsi14 >= 55 ? "positive" : (rsi14 <= 45 ? "soft" : "neutral")))
+    lines.push("RSI14 is " + rsi14.toFixed(0) + " (" + rsiState + ").")
+  }
+  if (sr.support !== null && sr.resistance !== null) lines.push("Recent support is near " + formatPrice(sr.support) + "; resistance is near " + formatPrice(sr.resistance) + ".")
+  if (avgVol !== null && lastVol !== null) {
+    var volPct = avgVol ? ((lastVol - avgVol) / avgVol) * 100 : 0
+    lines.push("Latest volume is " + Math.abs(volPct).toFixed(0) + "% " + (volPct >= 0 ? "above" : "below") + " its recent average.")
+  }
+
+  return { available: true, lines: lines, sma20: sma20, sma50: sma50, rsi14: rsi14, support: sr.support, resistance: sr.resistance }
+}
+
 // ---- Ticker tape.
 
 function tapeItems(quotes, compact) {
@@ -631,6 +791,22 @@ function convertSeries(series, rate) {
   return out
 }
 
+function convertCandles(candles, rate) {
+  var list = candles || []
+  var r = toNumber(rate)
+  if (r === null || r === 1) return list
+  var out = []
+  for (var i = 0; i < list.length; i++) out.push({
+    t: list[i].t,
+    o: scaled(list[i].o, r),
+    h: scaled(list[i].h, r),
+    l: scaled(list[i].l, r),
+    c: scaled(list[i].c, r),
+    v: list[i].v
+  })
+  return out
+}
+
 function scaled(value, rate) {
   var n = toNumber(value)
   return n === null ? null : n * rate
@@ -660,6 +836,7 @@ function convertQuote(quote, display, rates) {
   out.week52High = scaled(quote.week52High, rate)
   out.open = scaled(quote.open, rate)
   out.series = convertSeries(quote.series, rate)
+  out.candles = convertCandles(quote.candles, rate)
   out.currency = target
   out.converted = true
   return out
@@ -690,10 +867,12 @@ if (typeof module !== "undefined") {
     emptyQuote: emptyQuote,
     parseChartResponse: parseChartResponse,
     parseQuoteLines: parseQuoteLines,
+    parseCandles: parseCandles,
     isValid: isValid,
     isDown: isDown,
     isUp: isUp,
     validCount: validCount,
+    quoteRowsForSymbols: quoteRowsForSymbols,
     firstValidIndex: firstValidIndex,
     nextIndex: nextIndex,
     shouldRetry: shouldRetry,
@@ -712,6 +891,13 @@ if (typeof module !== "undefined") {
     seriesDirection: seriesDirection,
     seriesPoints: seriesPoints,
     valueToY: valueToY,
+    closeValues: closeValues,
+    smaValue: smaValue,
+    smaSeries: smaSeries,
+    rsiValue: rsiValue,
+    averageVolume: averageVolume,
+    supportResistance: supportResistance,
+    technicalSummary: technicalSummary,
     tapeItems: tapeItems,
     normalizeColor: normalizeColor,
     parseThemeColor: parseThemeColor,
@@ -725,6 +911,7 @@ if (typeof module !== "undefined") {
     parseRateLines: parseRateLines,
     rateFor: rateFor,
     convertSeries: convertSeries,
+    convertCandles: convertCandles,
     convertQuote: convertQuote,
     convertAll: convertAll
   }

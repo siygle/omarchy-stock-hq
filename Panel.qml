@@ -21,18 +21,26 @@ Panel {
   readonly property var barIdentity: hostWidget || root
 
   // ---- Settings (inline on this widget's shell.json entry).
-  readonly property var watchlists: Model.normalizeWatchlists(setting("watchlists", null), setting("symbols", null))
-  readonly property int activeWatchlist: Model.activeWatchlistIndex(setting("activeWatchlist", 0), watchlists)
-  readonly property var activeList: watchlists[activeWatchlist] || { name: "Main", symbols: Model.DEFAULT_SYMBOLS }
-  readonly property var symbols: activeList.symbols
-  readonly property string symbolsKey: activeWatchlist + ":" + symbols.join(",")
-  readonly property int refreshMinutes: Model.refreshMinutes(setting("refreshMinutes", 5))
-  readonly property bool compact: setting("compact", false) === true || String(setting("compact", false)) === "true"
-  readonly property string activeRange: Model.chartRange(setting("chartRange", "1d"))
-  readonly property string displayCurrency: Model.normalizeCurrency(setting("currency", ""))
-  readonly property var currencies: Model.normalizeCurrencies(setting("currencies", null))
-  readonly property string upColorSetting: Model.normalizeColor(setting("upColor", ""))
-  readonly property string downColorSetting: Model.normalizeColor(setting("downColor", ""))
+  property var watchlists: Model.normalizeWatchlists(null, null)
+  property int activeWatchlist: 0
+  property var activeList: ({ name: "Main", symbols: Model.DEFAULT_SYMBOLS })
+  property var symbols: Model.DEFAULT_SYMBOLS
+  property string symbolsKey: "0:" + Model.DEFAULT_SYMBOLS.join(",")
+  property int refreshMinutes: 5
+  property bool compact: false
+  property string activeRange: "1d"
+  property string displayCurrency: ""
+  property var currencies: Model.normalizeCurrencies(null)
+  property string upColorSetting: ""
+  property string downColorSetting: ""
+
+  // ---- Persistent quote cache. Settings stay in shell.json; fetched market
+  //      data lives in XDG state so it survives shell restarts without making
+  //      user config noisy.
+  readonly property string homeDir: Quickshell.env("HOME")
+  readonly property string cacheDir: homeDir + "/.local/state/omarchy-stocks"
+  readonly property string cachePath: cacheDir + "/cache.json"
+  property bool cacheLoaded: false
 
   // ---- Quote state. `quotes` keeps the last good result across failures so
   //      stale-but-useful numbers stay visible; `fetchError` explains why.
@@ -62,9 +70,10 @@ Panel {
 
   readonly property string userAgent: "Mozilla/5.0 (X11; Linux x86_64) omarchy-stocks/0.1.0"
   readonly property bool loading: quotes.length === 0 && fetchError === ""
-  readonly property int validCount: Model.validCount(quotes)
+  readonly property var quoteRows: Model.quoteRowsForSymbols(quotes, symbols, "No cached data")
+  readonly property int validCount: Model.validCount(quoteRows)
   // Quotes as displayed: converted into the display currency when a rate is known.
-  readonly property var shownQuotes: Model.convertAll(quotes, displayCurrency, rates)
+  readonly property var shownQuotes: Model.convertAll(quoteRows, displayCurrency, rates)
   readonly property var tapeItems: Model.tapeItems(shownQuotes, compact)
   readonly property var selectedQuote: selectedIndex >= 0 && selectedIndex < shownQuotes.length ? shownQuotes[selectedIndex] : null
   readonly property bool hasSelection: Model.isValid(selectedQuote)
@@ -176,6 +185,7 @@ Panel {
     lastUpdated = new Date()
     fetchError = ""
     retries = 0
+    scheduleCacheSave()
     ensureRates()
     // Fresh quotes deserve fresh charts, unless the cache is under a minute old.
     if (root.opened && Date.now() - chartFetchedAt > 60000) ensureChartSeries(true)
@@ -206,6 +216,7 @@ Panel {
     for (var k in rates) merged[k] = rates[k]
     for (var f in fresh) merged[f] = fresh[f]
     rates = merged
+    scheduleCacheSave()
   }
 
   function updateSettings(patch) {
@@ -257,6 +268,7 @@ Panel {
     chartSeries = Model.parseSeriesLines(raw, symbols)
     chartSeriesRange = chartRequestedRange
     chartFetchedAt = Date.now()
+    scheduleCacheSave()
     // The range moved on while we were fetching: go again for the new one.
     if (chartRequestedRange !== activeRange) Qt.callLater(root.startChartFetch)
   }
@@ -268,6 +280,15 @@ Panel {
     if (activeRange === "1d") return quote.series || []
     var raw = chartSeries[quote.symbol] || []
     return Model.convertSeries(raw, Model.rateFor(quote.nativeCurrency || quote.currency, displayCurrency, rates))
+  }
+
+  function candlesFor(quote) {
+    if (!quote || activeRange !== "1d") return []
+    return quote.candles || []
+  }
+
+  function analysisFor(quote, series) {
+    return Model.technicalSummary(quote, series, candlesFor(quote))
   }
 
   // Range chips persist their choice into this widget's shell.json entry, the
@@ -369,6 +390,84 @@ Panel {
     return Qt.formatDateTime(d, range === "1d" ? "HH:mm" : (range === "5d" ? "ddd HH:mm" : "d MMM"))
   }
 
+  // ---- Cache persistence.
+  function loadCache(raw) {
+    if (cacheLoaded) return
+    cacheLoaded = true
+    var parsed = null
+    try { parsed = JSON.parse(String(raw || "")) } catch (e) { parsed = null }
+    if (!parsed || parsed.version !== 1) return
+
+    // Hydrate by symbol, not by exact watchlist key. This keeps existing cached
+    // rows useful after the user adds/removes/reorders symbols, and it also
+    // shows newly added symbols immediately as uncached rows if Yahoo is slow
+    // or rate-limited during startup.
+    if (quotes.length === 0 && parsed.quotes instanceof Array) {
+      var bySymbol = {}
+      for (var i = 0; i < parsed.quotes.length; i++) {
+        var cached = parsed.quotes[i]
+        if (cached && cached.symbol) bySymbol[String(cached.symbol).toUpperCase()] = cached
+      }
+      var restored = []
+      for (var j = 0; j < symbols.length; j++) {
+        var symbol = String(symbols[j]).toUpperCase()
+        restored.push(bySymbol[symbol] || Model.emptyQuote(symbol, "No cached data"))
+      }
+      if (restored.length) quotes = restored
+    }
+
+    if (parsed.rates && typeof parsed.rates === "object") rates = parsed.rates
+    if (parsed.chartSeries && typeof parsed.chartSeries === "object") chartSeries = parsed.chartSeries
+    if (typeof parsed.chartSeriesRange === "string") chartSeriesRange = parsed.chartSeriesRange
+    if (typeof parsed.chartFetchedAt === "number") chartFetchedAt = parsed.chartFetchedAt
+    if (typeof parsed.lastUpdated === "number") lastUpdated = new Date(parsed.lastUpdated)
+  }
+
+  function cachePayload() {
+    return {
+      version: 1,
+      symbolsKey: symbolsKey,
+      activeWatchlist: activeWatchlist,
+      displayCurrency: displayCurrency,
+      savedAt: Date.now(),
+      lastUpdated: lastUpdated ? lastUpdated.getTime() : null,
+      quotes: quotes,
+      rates: rates,
+      chartSeries: chartSeries,
+      chartSeriesRange: chartSeriesRange,
+      chartFetchedAt: chartFetchedAt
+    }
+  }
+
+  function scheduleCacheSave() {
+    // If a network response beats the async cache read, mark loaded so the
+    // older disk payload cannot overwrite fresher quotes when it arrives.
+    cacheLoaded = true
+    cacheSaveTimer.restart()
+  }
+
+  function flushCache() {
+    cacheFile.setText(JSON.stringify(cachePayload(), null, 2) + "\n")
+  }
+
+  function applySettings() {
+    var s = settings || {}
+    watchlists = Model.normalizeWatchlists(s.watchlists, s.symbols)
+    activeWatchlist = Model.activeWatchlistIndex(s.activeWatchlist, watchlists)
+    activeList = watchlists[activeWatchlist] || { name: "Main", symbols: Model.DEFAULT_SYMBOLS }
+    symbols = activeList.symbols
+    symbolsKey = activeWatchlist + ":" + symbols.join(",")
+    refreshMinutes = Model.refreshMinutes(s.refreshMinutes, 5)
+    compact = s.compact === true || String(s.compact) === "true"
+    activeRange = Model.chartRange(s.chartRange || "1d")
+    displayCurrency = Model.normalizeCurrency(s.currency || "")
+    currencies = Model.normalizeCurrencies(s.currencies || null)
+    upColorSetting = Model.normalizeColor(s.upColor || "")
+    downColorSetting = Model.normalizeColor(s.downColor || "")
+  }
+
+  onSettingsChanged: applySettings()
+
   // Settings edits that change the symbol list invalidate everything shown.
   // Keyed on the joined string so re-injected-but-identical settings (any
   // shell.json save) do not trigger a refetch.
@@ -380,9 +479,10 @@ Panel {
     fetchError = ""
     lastUpdated = null
     retries = 0
+    cacheLoaded = false
     fetchProc.running = false
     chartProc.running = false
-    Qt.callLater(root.startFetch)
+    Qt.callLater(function() { cacheFile.reload(); root.startFetch() })
     if (root.opened) Qt.callLater(function() { root.ensureChartSeries(true) })
   }
 
@@ -399,7 +499,33 @@ Panel {
 
   // Deferred so the first fetch sees the settings BarWidget injects right
   // after this component loads (Loader.onLoaded runs before callLater fires).
-  Component.onCompleted: Qt.callLater(root.startFetch)
+  Component.onCompleted: {
+    applySettings()
+    cacheDirProc.running = true
+    Qt.callLater(function() { cacheFile.reload(); root.startFetch() })
+  }
+
+  FileView {
+    id: cacheFile
+    path: root.cachePath
+    watchChanges: false
+    atomicWrites: true
+    printErrors: false
+    onLoaded: root.loadCache(text())
+    onLoadFailed: root.loadCache("")
+  }
+
+  Timer {
+    id: cacheSaveTimer
+    interval: 300
+    repeat: false
+    onTriggered: root.flushCache()
+  }
+
+  Process {
+    id: cacheDirProc
+    command: ["mkdir", "-p", root.cacheDir]
+  }
 
   Process {
     id: fetchProc
@@ -464,10 +590,17 @@ Panel {
     property real pad: 2
     property bool fill: false
     property var referenceValue: null
+    property var overlaySeries: []
+    property color overlayColor: root.mutedForeground
+    property var supportValue: null
+    property var resistanceValue: null
 
     onSeriesChanged: requestPaint()
     onLineColorChanged: requestPaint()
     onReferenceValueChanged: requestPaint()
+    onOverlaySeriesChanged: requestPaint()
+    onSupportValueChanged: requestPaint()
+    onResistanceValueChanged: requestPaint()
     onWidthChanged: requestPaint()
     onHeightChanged: requestPaint()
 
@@ -502,6 +635,22 @@ Panel {
         ctx.setLineDash([])
       }
 
+      function drawHorizontal(value, color) {
+        var y = Model.valueToY(value, Model.seriesBounds(canvas.series), canvas.height, canvas.pad)
+        if (y === null) return
+        ctx.strokeStyle = color
+        ctx.lineWidth = 1
+        ctx.setLineDash([4, 4])
+        ctx.beginPath()
+        ctx.moveTo(pts[0].x, y)
+        ctx.lineTo(pts[pts.length - 1].x, y)
+        ctx.stroke()
+        ctx.setLineDash([])
+      }
+
+      drawHorizontal(canvas.supportValue, Qt.rgba(root.upColor.r, root.upColor.g, root.upColor.b, 0.45))
+      drawHorizontal(canvas.resistanceValue, Qt.rgba(root.downColor.r, root.downColor.g, root.downColor.b, 0.45))
+
       ctx.strokeStyle = canvas.lineColor
       ctx.lineWidth = canvas.lineWidth
       ctx.lineJoin = "round"
@@ -510,6 +659,29 @@ Panel {
       ctx.moveTo(pts[0].x, pts[0].y)
       for (var i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y)
       ctx.stroke()
+
+      var overlay = canvas.overlaySeries || []
+      if (overlay.length >= 2) {
+        var bounds = Model.seriesBounds(canvas.series)
+        var t0 = canvas.series[0].t
+        var t1 = canvas.series[canvas.series.length - 1].t
+        var span = t1 - t0
+        var innerW = canvas.width - canvas.pad * 2
+        ctx.strokeStyle = Qt.rgba(canvas.overlayColor.r, canvas.overlayColor.g, canvas.overlayColor.b, 0.9)
+        ctx.lineWidth = 1.1
+        ctx.setLineDash([2, 2])
+        ctx.beginPath()
+        var started = false
+        for (var o = 0; o < overlay.length; o++) {
+          var y = Model.valueToY(overlay[o].c, bounds, canvas.height, canvas.pad)
+          if (y === null) continue
+          var x = span > 0 ? canvas.pad + ((overlay[o].t - t0) / span) * innerW : canvas.pad
+          if (!started) { ctx.moveTo(x, y); started = true }
+          else ctx.lineTo(x, y)
+        }
+        if (started) ctx.stroke()
+        ctx.setLineDash([])
+      }
     }
   }
 
@@ -746,21 +918,26 @@ Panel {
           x: Style.space(8)
           spacing: Style.space(6)
 
+          readonly property real controlHeight: Style.space(24)
+
           TextField {
             id: symbolField
-            width: Style.space(160)
+            width: Style.space(170)
+            height: parent.controlHeight
             text: root.symbolDraft
             visible: root.editorOpen
             foreground: root.barForeground
-            placeholderText: "TW:2330, 0700.HK, AAPL"
-            verticalPadding: Style.space(3)
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            placeholderText: "Symbol, e.g. TW:2330"
+            verticalPadding: Style.space(2)
             onTextChanged: root.symbolDraft = text
             onAccepted: root.saveSymbolDraft()
           }
 
           Rectangle {
             width: symbolActionText.implicitWidth + Style.space(12)
-            height: symbolActionText.implicitHeight + Style.space(6)
+            height: parent.controlHeight
             radius: Style.cornerRadius
             color: symbolActionMouse.containsMouse ? Style.hoverFillFor(root.barForeground, Color.accent) : "transparent"
             Text {
@@ -781,12 +958,21 @@ Panel {
             }
           }
 
-          Text {
+          Rectangle {
             visible: root.editorOpen
-            text: "Cancel"
-            color: cancelMouse.containsMouse ? root.barForeground : root.mutedForeground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
+            width: cancelText.implicitWidth + Style.space(12)
+            height: parent.controlHeight
+            radius: Style.cornerRadius
+            color: cancelMouse.containsMouse ? Style.hoverFillFor(root.barForeground, Color.accent) : "transparent"
+            Text {
+              id: cancelText
+              anchors.centerIn: parent
+              text: "Cancel"
+              color: root.mutedForeground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: true
+            }
             MouseArea {
               id: cancelMouse
               anchors.fill: parent
@@ -794,14 +980,6 @@ Panel {
               cursorShape: Qt.PointingHandCursor
               onClicked: root.editorOpen = false
             }
-          }
-
-          Text {
-            text: "Asia shortcuts: TW:2330, TWO:6488, HK:0700, JP:7203, KR:005930"
-            color: root.mutedForeground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-            elide: Text.ElideRight
           }
         }
 
@@ -973,6 +1151,8 @@ Panel {
 
           readonly property var quote: root.selectedQuote
           readonly property var series: root.hasSelection ? root.seriesFor(root.selectedQuote) : []
+          readonly property var analysis: root.analysisFor(quote, series)
+          readonly property var sma20Series: Model.smaSeries(series, 20)
           readonly property var bounds: Model.seriesBounds(series)
           readonly property real statLabelWidth: Style.space(84)
           readonly property real statValueWidth: (width - Style.space(16)) / 2 - statLabelWidth
@@ -1051,6 +1231,10 @@ Panel {
               pad: 4
               fill: true
               referenceValue: root.activeRange === "1d" && detail.quote ? detail.quote.prevClose : null
+              overlaySeries: detail.sma20Series
+              overlayColor: root.mutedForeground
+              supportValue: detail.analysis.support
+              resistanceValue: detail.analysis.resistance
             }
 
             Text {
@@ -1103,6 +1287,46 @@ Panel {
               color: root.mutedForeground
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
+            }
+          }
+
+          Column {
+            width: parent.width
+            spacing: Style.space(4)
+
+            Text {
+              leftPadding: Style.space(8)
+              text: "Technical analysis"
+              color: root.barForeground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              font.bold: true
+            }
+
+            Repeater {
+              model: detail.analysis.lines
+
+              Text {
+                required property string modelData
+                width: parent.width
+                leftPadding: Style.space(8)
+                rightPadding: Style.space(8)
+                text: "• " + modelData
+                wrapMode: Text.WordWrap
+                color: root.mutedForeground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+            }
+
+            Text {
+              visible: detail.sma20Series.length >= 2
+              leftPadding: Style.space(8)
+              text: "Dashed line: SMA20 · Green/red dashed levels: recent support/resistance"
+              color: root.mutedForeground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              font.italic: true
             }
           }
 

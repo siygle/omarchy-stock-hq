@@ -3,8 +3,8 @@
 A Wall-Street-style ticker tape for the Omarchy Quattro bar. The tape scrolls
 your symbols (`AAPL 305.59 ▲0.42%  •  NVDA …`) in the theme's green/red; click
 it for a panel with sparklines, a detail chart with range selector, key stats,
-watchlists, inline add/edit/delete, and a currency switch. Quotes and FX rates
-come from Yahoo Finance — no API key.
+watchlists, inline add/edit/delete, technical analysis, and a currency switch.
+Quotes and FX rates come from Yahoo Finance — no API key.
 
 ![preview](preview.png)
 
@@ -33,6 +33,7 @@ omarchy bar move io.github.5d0tal1gat0r.stocks --section right
 | panel | `+ Symbol`, `Edit`, `×` | add, edit, or delete symbols directly |
 | panel | watchlist chips / `+ Watchlist` | switch lists or create another list |
 | panel | list name field / `Delete list` | rename or remove the active watchlist |
+| panel | `Technical analysis` | plain-English trend notes with SMA20, RSI14, support/resistance and volume context |
 | panel | `Open on Yahoo Finance ↗` | open the selected symbol in your browser |
 
 IPC (for keybindings): `omarchy-shell io.github.5d0tal1gat0r.stocks toggle|open|close|refresh|pause`
@@ -40,7 +41,10 @@ IPC (for keybindings): `omarchy-shell io.github.5d0tal1gat0r.stocks toggle|open|
 ## Configure
 
 Settings live on the widget's entry in `~/.config/omarchy/shell.json` and apply
-instantly:
+instantly. Fetched quote/chart data is cached separately in
+`~/.local/state/omarchy-stocks/cache.json` so the widget can show the last
+known data immediately after an Omarchy shell restart while refreshing in the
+background:
 
 ```sh
 omarchy bar set io.github.5d0tal1gat0r.stocks symbols '["AAPL","MSFT","BTC-USD","^GSPC"]' --json
@@ -87,7 +91,8 @@ qs log -p /usr/share/omarchy/shell --tail 100               # shell log
 ```
 
 `Model.js` holds every piece of logic that does not need QML (parsing, formatting,
-conversion, chart geometry) so it can be tested with plain Node.
+conversion, chart geometry, technical indicators/explanations) so it can be
+tested with plain Node.
 
 ## Remove
 
