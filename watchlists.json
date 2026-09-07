@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "activeWatchlist": 0,
+  "watchlists": [
+    {
+      "name": "Main",
+      "symbols": ["AAPL", "NVDA", "SPCX", "GOOGL"]
+    },
+    {
+      "name": "Taiwan",
+      "symbols": ["2330.TW", "0050.TW", "0700.HK", "7203.T"]
+    }
+  ]
+}

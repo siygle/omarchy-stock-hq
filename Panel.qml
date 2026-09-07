@@ -10,7 +10,7 @@ import "Model.js" as Model
 // `tapeItems` / `label` into the bar (same split as omarchy.weather).
 Panel {
   id: root
-  moduleName: "io.github.5d0tal1gat0r.stocks"
+  moduleName: "io.github.siygle.stock-hq"
   // The bar entry (BarWidget.qml) owns the IPC target; see its IpcHandler.
   manageIpc: false
 
@@ -20,7 +20,9 @@ Panel {
   property var hostWidget: null
   readonly property var barIdentity: hostWidget || root
 
-  // ---- Settings (inline on this widget's shell.json entry).
+  // ---- Settings. UI preferences stay inline on this widget's shell.json entry;
+  //      watchlists live in a JSON definition file so symbols are not stored in
+  //      shell.json text fields.
   property var watchlists: Model.normalizeWatchlists(null, null)
   property int activeWatchlist: 0
   property var activeList: ({ name: "Main", symbols: Model.DEFAULT_SYMBOLS })
@@ -33,12 +35,17 @@ Panel {
   property var currencies: Model.normalizeCurrencies(null)
   property string upColorSetting: ""
   property string downColorSetting: ""
+  property bool watchlistsFileLoaded: false
+  property var watchlistsFileLists: []
+  property int watchlistsFileActive: 0
 
   // ---- Persistent quote cache. Settings stay in shell.json; fetched market
   //      data lives in XDG state so it survives shell restarts without making
   //      user config noisy.
   readonly property string homeDir: Quickshell.env("HOME")
-  readonly property string cacheDir: homeDir + "/.local/state/omarchy-stocks"
+  property string watchlistsDir: homeDir + "/.local/share/omarchy-stock-hq"
+  property string watchlistsPath: watchlistsDir + "/watchlists.json"
+  readonly property string cacheDir: homeDir + "/.local/state/omarchy-stock-hq"
   readonly property string cachePath: cacheDir + "/cache.json"
   property bool cacheLoaded: false
 
@@ -55,6 +62,13 @@ Panel {
   property int editingIndex: -1
   property string symbolDraft: ""
 
+  // ---- Settings panel state.
+  property bool settingsOpen: false
+  property string refreshMinutesDraft: "5"
+  property string selectedImportPath: ""
+  property string selectedExportPath: ""
+  property string fileDialogMessage: ""
+
   // ---- Chart-series cache for the active range when it is not 1d (the 1d
   //      series rides along with every quote fetch).
   property var chartSeries: ({})
@@ -68,7 +82,7 @@ Panel {
   property var ratesRequested: []
   property int ratesRetries: 0
 
-  readonly property string userAgent: "Mozilla/5.0 (X11; Linux x86_64) omarchy-stocks/0.1.0"
+  readonly property string userAgent: "Mozilla/5.0 (X11; Linux x86_64) omarchy-stock-hq/0.1.0"
   readonly property bool loading: quotes.length === 0 && fetchError === ""
   readonly property var quoteRows: Model.quoteRowsForSymbols(quotes, symbols, "No cached data")
   readonly property int validCount: Model.validCount(quoteRows)
@@ -301,11 +315,59 @@ Panel {
 
   function selectWatchlist(index) {
     if (index === activeWatchlist || index < 0 || index >= watchlists.length) return
-    updateSettings({ activeWatchlist: index })
+    persistWatchlists(watchlists, index)
+  }
+
+  function watchlistsPayload(nextLists, nextActive) {
+    return {
+      version: 1,
+      activeWatchlist: Model.activeWatchlistIndex(nextActive, nextLists),
+      watchlists: Model.cloneWatchlists(nextLists)
+    }
+  }
+
+  function parseWatchlistsJson(raw, allowFallback) {
+    var parsed = null
+    try { parsed = JSON.parse(String(raw || "")) } catch (e) { parsed = null }
+    var lists = []
+    var active = 0
+
+    if (parsed instanceof Array) {
+      // Bare array: either [{ name, symbols }, ...] or ["AAPL", "NVDA"].
+      lists = Model.normalizeWatchlists(parsed, null)
+      if (!lists.length) lists = [{ name: "Main", symbols: Model.normalizeSymbols(parsed, []) }]
+    } else if (parsed && typeof parsed === "object") {
+      if (parsed.watchlists) lists = Model.normalizeWatchlists(parsed.watchlists, null)
+      else if (parsed.symbols) lists = [{ name: String(parsed.name || "Main"), symbols: Model.normalizeSymbols(parsed.symbols, []) }]
+      active = Model.activeWatchlistIndex(parsed.activeWatchlist, lists)
+    }
+
+    if (!lists.length) {
+      if (!allowFallback) return null
+      lists = Model.normalizeWatchlists(null, null)
+      active = 0
+    }
+    return { watchlists: lists, activeWatchlist: Model.activeWatchlistIndex(active, lists) }
+  }
+
+  function applyWatchlistsDefinition(definition) {
+    watchlistsFileLists = definition.watchlists
+    watchlistsFileActive = definition.activeWatchlist
+    watchlistsFileLoaded = true
+    applySettings()
+  }
+
+  function loadWatchlists(raw) {
+    applyWatchlistsDefinition(parseWatchlistsJson(raw, true))
   }
 
   function persistWatchlists(nextLists, nextActive) {
-    updateSettings({ watchlists: nextLists, activeWatchlist: nextActive })
+    var payload = watchlistsPayload(nextLists, nextActive)
+    watchlistsFileLists = payload.watchlists
+    watchlistsFileActive = payload.activeWatchlist
+    watchlistsFileLoaded = true
+    watchlistsFile.setText(JSON.stringify(payload, null, 2) + "\n")
+    applySettings()
   }
 
   function beginAddSymbol() {
@@ -380,6 +442,84 @@ Panel {
       root.bar.run("xdg-open " + Model.shellQuote(Model.quoteUrl(symbol)))
   }
 
+  function toggleSettings() {
+    settingsOpen = !settingsOpen
+    refreshMinutesDraft = String(refreshMinutes)
+  }
+
+  function saveRefreshMinutesDraft() {
+    var minutes = Model.refreshMinutes(refreshMinutesDraft, refreshMinutes)
+    updateSettings({ refreshMinutes: minutes })
+    refreshMinutesDraft = String(minutes)
+  }
+
+  function filePathFromUrl(value) {
+    var raw = String(value || "").trim()
+    if (raw.indexOf("file://") === 0) return decodeURIComponent(raw.substring(7))
+    return raw
+  }
+
+  function openWatchlistsFile() {
+    if (root.bar && typeof root.bar.run === "function")
+      root.bar.run("xdg-open " + Model.shellQuote(watchlistsPath))
+  }
+
+  function defaultExportFilename() {
+    var now = new Date()
+    var y = now.getFullYear()
+    var m = now.getMonth() + 1
+    var d = now.getDate()
+    return "omarchy-stock-hq-" + y + "-" + (m < 10 ? "0" + m : m) + "-" + (d < 10 ? "0" + d : d) + ".json"
+  }
+
+  function requestExportWatchlists() {
+    if (exportSelectProc.running) return
+    fileDialogMessage = "Choose an export folder…"
+    selectedExportPath = ""
+    exportSelectProc.running = true
+  }
+
+  function handleSelectedExportPath(path) {
+    var target = filePathFromUrl(path)
+    if (target === "") return
+    if (!/\.json$/i.test(target)) {
+      if (target.charAt(target.length - 1) !== "/") target += "/"
+      target += defaultExportFilename()
+    }
+    selectedExportPath = target
+    exportFile.path = target
+    exportFile.setText(JSON.stringify(watchlistsPayload(watchlists, activeWatchlist), null, 2) + "\n")
+    fileDialogMessage = "Exported " + target
+  }
+
+  function requestImportWatchlists() {
+    if (importReadProc.running) return
+    fileDialogMessage = "Choose a stock-list JSON file…"
+    selectedImportPath = ""
+    importSelectProc.running = true
+  }
+
+  function handleSelectedImportPath(path) {
+    var source = filePathFromUrl(path)
+    if (source === "") return
+    selectedImportPath = source
+    importReadProc.command = ["cat", source]
+    importReadProc.running = true
+  }
+
+  function importWatchlistsText(text) {
+    var definition = parseWatchlistsJson(text, false)
+    if (!definition) {
+      fileDialogMessage = "Import failed: JSON must contain watchlists or symbols"
+      return
+    }
+    var beforeKey = symbolsKey
+    applyWatchlistsDefinition(definition)
+    watchlistsFile.setText(JSON.stringify(watchlistsPayload(definition.watchlists, definition.activeWatchlist), null, 2) + "\n")
+    fileDialogMessage = "Imported " + selectedImportPath
+    if (symbolsKey === beforeKey) root.refresh()
+  }
+
   function rangeLabel(range) {
     return { "1d": "1D", "5d": "5D", "1mo": "1M", "6mo": "6M", "1y": "1Y" }[range] || range
   }
@@ -452,12 +592,18 @@ Panel {
 
   function applySettings() {
     var s = settings || {}
-    watchlists = Model.normalizeWatchlists(s.watchlists, s.symbols)
-    activeWatchlist = Model.activeWatchlistIndex(s.activeWatchlist, watchlists)
+    watchlistsPath = String(s.watchlistsPath || (watchlistsDir + "/watchlists.json"))
+    watchlists = watchlistsFileLoaded && watchlistsFileLists.length
+      ? Model.cloneWatchlists(watchlistsFileLists)
+      : Model.normalizeWatchlists(s.watchlists, s.symbols)
+    activeWatchlist = watchlistsFileLoaded
+      ? Model.activeWatchlistIndex(watchlistsFileActive, watchlists)
+      : Model.activeWatchlistIndex(s.activeWatchlist, watchlists)
     activeList = watchlists[activeWatchlist] || { name: "Main", symbols: Model.DEFAULT_SYMBOLS }
     symbols = activeList.symbols
     symbolsKey = activeWatchlist + ":" + symbols.join(",")
     refreshMinutes = Model.refreshMinutes(s.refreshMinutes, 5)
+    if (!settingsOpen) refreshMinutesDraft = String(refreshMinutes)
     compact = s.compact === true || String(s.compact) === "true"
     activeRange = Model.chartRange(s.chartRange || "1d")
     displayCurrency = Model.normalizeCurrency(s.currency || "")
@@ -467,6 +613,7 @@ Panel {
   }
 
   onSettingsChanged: applySettings()
+  onWatchlistsPathChanged: if (watchlistsFile) watchlistsFile.reload()
 
   // Settings edits that change the symbol list invalidate everything shown.
   // Keyed on the joined string so re-injected-but-identical settings (any
@@ -502,7 +649,70 @@ Panel {
   Component.onCompleted: {
     applySettings()
     cacheDirProc.running = true
-    Qt.callLater(function() { cacheFile.reload(); root.startFetch() })
+    Qt.callLater(function() { watchlistsFile.reload(); cacheFile.reload(); root.startFetch() })
+  }
+
+  FileView {
+    id: watchlistsFile
+    path: root.watchlistsPath
+    watchChanges: true
+    atomicWrites: true
+    printErrors: false
+    onLoaded: root.loadWatchlists(text())
+    onLoadFailed: root.loadWatchlists("")
+  }
+
+  FileView {
+    id: exportFile
+    path: root.watchlistsPath
+    atomicWrites: true
+    printErrors: false
+  }
+
+  Process {
+    id: exportSelectProc
+    command: ["omarchy-file-select", "--title", "Choose Stock HQ export folder", "--directory"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.selectedExportPath = String(text || "").trim()
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (String(text || "").trim() !== "") root.fileDialogMessage = String(text).trim()
+    }
+    onExited: function(exitCode) {
+      if (exitCode === 0 && root.selectedExportPath !== "") root.handleSelectedExportPath(root.selectedExportPath)
+      else if (root.fileDialogMessage === "Choose an export folder…") root.fileDialogMessage = "Export cancelled"
+    }
+  }
+
+  Process {
+    id: importSelectProc
+    command: ["omarchy-file-select", "--title", "Import Stock HQ JSON", "--extensions", "json"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.selectedImportPath = String(text || "").trim()
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (String(text || "").trim() !== "") root.fileDialogMessage = String(text).trim()
+    }
+    onExited: function(exitCode) {
+      if (exitCode === 0 && root.selectedImportPath !== "") root.handleSelectedImportPath(root.selectedImportPath)
+      else if (root.fileDialogMessage === "Choose a stock-list JSON file…") root.fileDialogMessage = "Import cancelled"
+    }
+  }
+
+  Process {
+    id: importReadProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.importWatchlistsText(text)
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (String(text || "").trim() !== "") root.fileDialogMessage = String(text).trim()
+    }
   }
 
   FileView {
@@ -524,7 +734,7 @@ Panel {
 
   Process {
     id: cacheDirProc
-    command: ["mkdir", "-p", root.cacheDir]
+    command: ["mkdir", "-p", root.cacheDir, root.watchlistsDir]
   }
 
   Process {
@@ -764,43 +974,12 @@ Panel {
               }
             }
 
-            Item { width: Style.space(8); height: 1 }
-
-            // Display currency: click cycles forward, right-click back.
-            Rectangle {
-              id: currencyChip
-              readonly property bool active: root.displayCurrency !== ""
-              width: currencyText.implicitWidth + Style.space(12)
-              height: currencyText.implicitHeight + Style.space(6)
-              radius: Style.cornerRadius
-              color: currencyChip.active
-                ? Style.selectedFillFor(root.barForeground, Color.accent)
-                : (currencyMouse.containsMouse ? Style.hoverFillFor(root.barForeground, Color.accent) : "transparent")
-
-              Text {
-                id: currencyText
-                anchors.centerIn: parent
-                text: (root.displayCurrency !== "" ? root.displayCurrency : "Native") + " ⇄"
-                color: currencyChip.active ? root.barForeground : root.mutedForeground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                font.bold: currencyChip.active
-              }
-
-              MouseArea {
-                id: currencyMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                acceptedButtons: Qt.LeftButton | Qt.RightButton
-                cursorShape: Qt.PointingHandCursor
-                onClicked: function(mouse) { root.selectCurrency(mouse.button === Qt.RightButton ? -1 : 1) }
-              }
-            }
           }
 
           Text {
-            anchors.right: parent.right
-            anchors.rightMargin: Style.space(8)
+            id: updatedText
+            anchors.right: headerSettings.left
+            anchors.rightMargin: Style.space(6)
             anchors.verticalCenter: parent.verticalCenter
             text: root.lastUpdated
               ? "Updated " + Qt.formatTime(root.lastUpdated, "HH:mm")
@@ -808,6 +987,282 @@ Panel {
             color: root.mutedForeground
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
+          }
+
+          Rectangle {
+            id: headerSettings
+            anchors.right: headerRefresh.left
+            anchors.rightMargin: Style.space(4)
+            anchors.verticalCenter: parent.verticalCenter
+            width: settingsText.implicitWidth + Style.space(10)
+            height: settingsText.implicitHeight + Style.space(6)
+            radius: Style.cornerRadius
+            color: settingsMouse.containsMouse ? Style.hoverFillFor(root.barForeground, Color.accent) : "transparent"
+
+            Text {
+              id: settingsText
+              anchors.centerIn: parent
+              text: "⚙"
+              color: settingsMouse.containsMouse ? root.barForeground : root.mutedForeground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              font.bold: true
+            }
+
+            MouseArea {
+              id: settingsMouse
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.toggleSettings()
+            }
+          }
+
+          Rectangle {
+            id: headerRefresh
+            anchors.right: parent.right
+            anchors.rightMargin: Style.space(8)
+            anchors.verticalCenter: parent.verticalCenter
+            width: refreshText.implicitWidth + Style.space(10)
+            height: refreshText.implicitHeight + Style.space(6)
+            radius: Style.cornerRadius
+            color: refreshMouse.containsMouse ? Style.hoverFillFor(root.barForeground, Color.accent) : "transparent"
+
+            Text {
+              id: refreshText
+              anchors.centerIn: parent
+              text: "⟳"
+              color: refreshMouse.containsMouse ? root.barForeground : root.mutedForeground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              font.bold: true
+            }
+
+            MouseArea {
+              id: refreshMouse
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.refresh()
+            }
+          }
+        }
+
+        // ---- Settings panel: refresh interval, display currency, and JSON import/export.
+        Rectangle {
+          visible: root.settingsOpen
+          width: parent.width - Style.space(16)
+          x: Style.space(8)
+          height: visible ? settingsColumn.implicitHeight + Style.space(16) : 0
+          radius: Style.cornerRadius
+          color: Qt.rgba(root.barForeground.r, root.barForeground.g, root.barForeground.b, 0.06)
+          border.color: Qt.rgba(root.barForeground.r, root.barForeground.g, root.barForeground.b, 0.16)
+          border.width: 1
+
+          Column {
+            id: settingsColumn
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: Style.space(8)
+            spacing: Style.space(8)
+
+            Text {
+              text: "Settings"
+              color: root.barForeground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              font.bold: true
+            }
+
+            Row {
+              spacing: Style.space(6)
+              height: Style.space(24)
+
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Refresh interval"
+                color: root.mutedForeground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+
+              TextField {
+                width: Style.space(44)
+                height: parent.height
+                text: root.refreshMinutesDraft
+                foreground: root.barForeground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                verticalPadding: Style.space(2)
+                onTextChanged: root.refreshMinutesDraft = text
+                onAccepted: root.saveRefreshMinutesDraft()
+              }
+
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: "minutes"
+                color: root.mutedForeground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+
+              Rectangle {
+                width: saveIntervalText.implicitWidth + Style.space(12)
+                height: parent.height
+                radius: Style.cornerRadius
+                color: saveIntervalMouse.containsMouse ? Style.hoverFillFor(root.barForeground, Color.accent) : "transparent"
+                Text {
+                  id: saveIntervalText
+                  anchors.centerIn: parent
+                  text: "Save"
+                  color: root.barForeground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.bold: true
+                }
+                MouseArea {
+                  id: saveIntervalMouse
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.saveRefreshMinutesDraft()
+                }
+              }
+            }
+
+            Row {
+              spacing: Style.space(6)
+              height: Style.space(24)
+
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Display currency"
+                color: root.mutedForeground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+
+              Rectangle {
+                readonly property bool active: root.displayCurrency !== ""
+                width: currencySettingsText.implicitWidth + Style.space(12)
+                height: parent.height
+                radius: Style.cornerRadius
+                color: active
+                  ? Style.selectedFillFor(root.barForeground, Color.accent)
+                  : (currencySettingsMouse.containsMouse ? Style.hoverFillFor(root.barForeground, Color.accent) : "transparent")
+
+                Text {
+                  id: currencySettingsText
+                  anchors.centerIn: parent
+                  text: (root.displayCurrency !== "" ? root.displayCurrency : "Native") + " ⇄"
+                  color: parent.active ? root.barForeground : root.mutedForeground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.bold: parent.active
+                }
+
+                MouseArea {
+                  id: currencySettingsMouse
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  acceptedButtons: Qt.LeftButton | Qt.RightButton
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: function(mouse) { root.selectCurrency(mouse.button === Qt.RightButton ? -1 : 1) }
+                }
+              }
+            }
+
+            Row {
+              spacing: Style.space(6)
+              height: Style.space(24)
+
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Stock list JSON"
+                color: root.mutedForeground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+
+              Rectangle {
+                width: exportText.implicitWidth + Style.space(12)
+                height: parent.height
+                radius: Style.cornerRadius
+                color: exportMouse.containsMouse ? Style.hoverFillFor(root.barForeground, Color.accent) : "transparent"
+                Text {
+                  id: exportText
+                  anchors.centerIn: parent
+                  text: "Export"
+                  color: root.barForeground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.bold: true
+                }
+                MouseArea {
+                  id: exportMouse
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.requestExportWatchlists()
+                }
+              }
+
+              Rectangle {
+                width: importText.implicitWidth + Style.space(12)
+                height: parent.height
+                radius: Style.cornerRadius
+                color: importMouse.containsMouse ? Style.hoverFillFor(root.barForeground, Color.accent) : "transparent"
+                Text {
+                  id: importText
+                  anchors.centerIn: parent
+                  text: "Import"
+                  color: root.barForeground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.bold: true
+                }
+                MouseArea {
+                  id: importMouse
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.requestImportWatchlists()
+                }
+              }
+
+              Rectangle {
+                width: folderText.implicitWidth + Style.space(12)
+                height: parent.height
+                radius: Style.cornerRadius
+                color: folderMouse.containsMouse ? Style.hoverFillFor(root.barForeground, Color.accent) : "transparent"
+                Text {
+                  id: folderText
+                  anchors.centerIn: parent
+                  text: "Open JSON"
+                  color: root.barForeground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.bold: true
+                }
+                MouseArea {
+                  id: folderMouse
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.openWatchlistsFile()
+                }
+              }
+            }
+
+            Text {
+              width: parent.width
+              text: root.fileDialogMessage !== "" ? root.fileDialogMessage : root.watchlistsPath
+              elide: Text.ElideMiddle
+              color: root.mutedForeground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
           }
         }
 

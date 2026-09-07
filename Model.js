@@ -162,7 +162,7 @@ function scrollSpeed(value, fallback) {
 // unknown symbol then still yields Yahoo's error JSON on its own line instead
 // of an empty line, which keeps the other symbols' lines aligned.
 function curlCommand(symbols, userAgent, range) {
-  var cmd = ["curl", "-sS", "--max-time", "10", "-A", String(userAgent || "omarchy-stocks"), "-w", "\n"]
+  var cmd = ["curl", "-sS", "--max-time", "10", "-A", String(userAgent || "omarchy-stock-hq"), "-w", "\n"]
   for (var i = 0; i < symbols.length; i++) cmd.push(chartUrl(symbols[i], range))
   return cmd
 }
