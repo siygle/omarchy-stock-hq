@@ -1,18 +1,18 @@
 {
   "schemaVersion": 1,
-  "id": "io.github.5d0tal1gat0r.stocks",
-  "name": "Stocks",
+  "id": "io.github.siygle.stock-hq",
+  "name": "Stock HQ",
   "version": "0.1.0",
-  "author": "5d0tal1gat0r",
+  "author": "siygle",
   "license": "MIT",
-  "description": "Stock ticker pill with a quotes panel for the Omarchy bar (Yahoo Finance, no API key).",
+  "description": "Stock HQ ticker tape with a quotes panel for the Omarchy bar (Yahoo Finance, no API key).",
   "kinds": ["bar-widget"],
   "entryPoints": {
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "Stocks",
-    "description": "Cycling stock ticker with a quotes panel",
+    "displayName": "Stock HQ",
+    "description": "Cycling Stock HQ ticker with a quotes panel",
     "category": "Info",
     "allowMultiple": false,
     "defaultSection": "center"

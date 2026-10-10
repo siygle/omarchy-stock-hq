@@ -7,11 +7,11 @@ import "Model.js" as Model
 // Bar entry for the Stocks widget: a fixed-width ticker tape that scrolls the
 // panel's quotes right-to-left. Panel plumbing follows omarchy.weather /
 // omarchy.clock so `omarchy-shell shell summon|hide|toggle
-// io.github.5d0tal1gat0r.stocks` route here through the bar's open/close/opened
+// io.github.siygle.stock-hq` route here through the bar's open/close/opened
 // contract.
 BarWidget {
   id: root
-  moduleName: "io.github.5d0tal1gat0r.stocks"
+  moduleName: "io.github.siygle.stock-hq"
 
   // ---- Settings (inline on this widget's shell.json entry).
   readonly property int tickerWidth: Model.tickerWidth(setting("tickerWidth", 180))
@@ -88,7 +88,7 @@ BarWidget {
   }
 
   IpcHandler {
-    target: "io.github.5d0tal1gat0r.stocks"
+    target: "io.github.siygle.stock-hq"
 
     function refresh(): void { root.broadcast("refresh") }
     function pause(): void { root.broadcast("togglePause") }
@@ -145,50 +145,50 @@ BarWidget {
     }
 
     // ---- Tape viewport: a run of every item, repeated enough times to cover
-    //      the viewport plus one extra run, animated left by exactly one run
-    //      width so the loop is seamless.
-    Item {
-      id: tape
-      visible: root.hasTape
-      anchors.fill: parent
-      anchors.leftMargin: Style.space(6)
-      anchors.rightMargin: Style.space(6)
-      clip: true
+      //      the viewport plus one extra run, animated left by exactly one run
+      //      width so the loop is seamless.
+      Item {
+        id: tape
+        visible: root.hasTape
+        anchors.fill: parent
+        anchors.leftMargin: Style.space(6)
+        anchors.rightMargin: Style.space(6)
+        clip: true
 
-      readonly property string separator: "  •  "
-      readonly property real runWidth: measure.implicitWidth
-      readonly property int copies: runWidth > 0 ? Math.max(2, Math.ceil(width / runWidth) + 1) : 2
-      readonly property bool scrolling: root.hasTape && root.scrollSpeed > 0 && runWidth > 0
-        && !root.pausedByUser && !button.tooltipHovered
-      property real offset: 0
+        readonly property string separator: "  •  "
+        readonly property real runWidth: measure.implicitWidth
+        readonly property int copies: runWidth > 0 ? Math.max(2, Math.ceil(width / runWidth) + 1) : 2
+        readonly property bool scrolling: root.hasTape && root.scrollSpeed > 0 && runWidth > 0
+          && !root.pausedByUser && !button.tooltipHovered
+        property real offset: 0
 
-      // Invisible single run used only to measure one loop's width.
-      TapeRun {
-        id: measure
-        visible: false
-      }
-
-      Row {
-        id: strip
-        x: -tape.offset
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: 0
-
-        Repeater {
-          model: tape.copies
-          TapeRun {}
+        // Invisible single run used only to measure one loop's width.
+        TapeRun {
+          id: measure
+          visible: false
         }
-      }
 
-      // Advances by elapsed time so hover/pause resumes exactly where it
-      // stopped, and the modulo keeps a changing run width seamless.
-      FrameAnimation {
-        running: tape.scrolling
-        onTriggered: {
-          if (tape.runWidth <= 0) return
-          tape.offset = (tape.offset + frameTime * root.scrollSpeed) % tape.runWidth
+        Row {
+          id: strip
+          x: -tape.offset
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: 0
+
+          Repeater {
+            model: tape.copies
+            TapeRun {}
+          }
+        }
+
+        // Advances by elapsed time so hover/pause resumes exactly where it
+        // stopped, and the modulo keeps a changing run width seamless.
+        FrameAnimation {
+          running: tape.scrolling
+          onTriggered: {
+            if (tape.runWidth <= 0) return
+            tape.offset = (tape.offset + frameTime * root.scrollSpeed) % tape.runWidth
+          }
         }
       }
     }
   }
-}

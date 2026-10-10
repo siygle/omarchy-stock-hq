@@ -10,6 +10,17 @@ test("normalizeSymbols: comma/space separated strings work (omarchy bar set with
   assert.deepEqual(Model.normalizeSymbols("aapl, nvda spcx;googl"), ["AAPL", "NVDA", "SPCX", "GOOGL"])
 })
 
+test("normalizeSymbol: Asian market shortcuts map to Yahoo Finance symbols", () => {
+  assert.equal(Model.normalizeSymbol("TW:2330"), "2330.TW")
+  assert.equal(Model.normalizeSymbol("tw2330"), "2330.TW")
+  assert.equal(Model.normalizeSymbol("TWO:6488"), "6488.TWO")
+  assert.equal(Model.normalizeSymbol("HK:0700"), "0700.HK")
+  assert.equal(Model.normalizeSymbol("JP:7203"), "7203.T")
+  assert.equal(Model.normalizeSymbol("KR:005930"), "005930.KS")
+  assert.equal(Model.normalizeSymbol("SZ:000001"), "000001.SZ")
+  assert.equal(Model.normalizeSymbol("2330.TW"), "2330.TW")
+})
+
 test("normalizeSymbols: empty or junk input falls back to the defaults", () => {
   assert.deepEqual(Model.normalizeSymbols(null), Model.DEFAULT_SYMBOLS)
   assert.deepEqual(Model.normalizeSymbols([]), Model.DEFAULT_SYMBOLS)
@@ -22,6 +33,21 @@ test("normalizeSymbols: returns a copy, never the shared default array", () => {
   const a = Model.normalizeSymbols(null)
   a.push("X")
   assert.deepEqual(Model.normalizeSymbols(null), Model.DEFAULT_SYMBOLS)
+})
+
+test("normalizeWatchlists: supports multiple lists and falls back to legacy symbols", () => {
+  assert.deepEqual(Model.normalizeWatchlists([{ name: "US", symbols: ["aapl"] }, { name: "TW", symbols: ["TW:2330", ""] }]), [
+    { name: "US", symbols: ["AAPL"] },
+    { name: "TW", symbols: ["2330.TW"] }
+  ])
+  assert.deepEqual(Model.normalizeWatchlists(null, ["msft"]), [{ name: "Main", symbols: ["MSFT"] }])
+  assert.equal(Model.activeWatchlistIndex(1, [{}, {}]), 1)
+  assert.equal(Model.activeWatchlistIndex(4, [{}, {}]), 0)
+  const cloned = Model.cloneWatchlists([{ name: "TW", symbols: ["tw2330"] }])
+  assert.deepEqual(cloned, [{ name: "TW", symbols: ["2330.TW"] }])
+  assert.deepEqual(Model.normalizeWatchlists({ 0: { name: "QML", symbols: { 0: "TW:2330", length: 1 } }, length: 1 }), [
+    { name: "QML", symbols: ["2330.TW"] }
+  ])
 })
 
 test("refreshMinutes: clamps to >= 1, non-numeric falls back", () => {
@@ -150,7 +176,7 @@ function quote(symbol, price, prev, error) {
   return q
 }
 
-test("isValid / isDown / validCount", () => {
+test("isValid / isDown / validCount / quoteRowsForSymbols", () => {
   assert.equal(Model.isValid(quote("AAPL", 305.59, 305.93)), true)
   assert.equal(Model.isValid(quote("NOPE", null, null, "Not Found")), false)
   assert.equal(Model.isValid(null), false)
@@ -160,6 +186,9 @@ test("isValid / isDown / validCount", () => {
   assert.equal(Model.isDown(null), false)
   assert.equal(Model.validCount([quote("A", 1, 1), quote("B", null, null, "Not Found"), quote("C", 2, 1)]), 2)
   assert.equal(Model.validCount(null), 0)
+  const rows = Model.quoteRowsForSymbols([quote("AAPL", 1, 1)], ["AAPL", "TW:2330"])
+  assert.deepEqual(rows.map(q => q.symbol), ["AAPL", "2330.TW"])
+  assert.equal(rows[1].error, "No cached data")
 })
 
 test("firstValidIndex / nextIndex skip invalid quotes and wrap", () => {
@@ -258,17 +287,24 @@ const SERIES_LINE = JSON.stringify({ chart: { result: [{ meta: {
   close: [305.76, null, 305.69, 305.59], open: [null, 305.8, 305.7, 305.6]
 }] } }], error: null } })
 
-test("parseChartResponse: series skips nulls, reads open/volume, prefers previousClose", () => {
+test("parseChartResponse: series/candles skip nulls, reads open/volume, prefers previousClose", () => {
   const q = Model.parseChartResponse(SERIES_LINE)
   assert.deepEqual(q.series, [{ t: 100, c: 305.76 }, { t: 300, c: 305.69 }, { t: 400, c: 305.59 }])
+  assert.deepEqual(q.candles.map(c => ({ t: c.t, c: c.c, o: c.o })), [
+    { t: 100, c: 305.76, o: null },
+    { t: 300, c: 305.69, o: 305.7 },
+    { t: 400, c: 305.59, o: 305.6 }
+  ])
   assert.equal(q.open, 305.8)
   assert.equal(q.volume, 32743947)
   assert.equal(q.prevClose, 305.93)
   const bare = Model.parseChartResponse(JSON.stringify({ chart: { result: [{ meta: { symbol: "X", regularMarketPrice: 2 } }] } }))
   assert.deepEqual(bare.series, [])
+  assert.deepEqual(bare.candles, [])
   assert.equal(bare.open, null)
   assert.equal(bare.volume, null)
   assert.deepEqual(Model.emptyQuote("Z", "No data").series, [])
+  assert.deepEqual(Model.emptyQuote("Z", "No data").candles, [])
 })
 
 test("parseSeriesLines: symbol -> series map, missing symbols get []", () => {
@@ -308,6 +344,24 @@ test("valueToY: inside the bounds maps like seriesPoints, outside is null", () =
   assert.equal(Model.valueToY(9, b, 40, 2), null)
   assert.equal(Model.valueToY(null, b, 40, 2), null)
   assert.equal(Model.valueToY(12, null, 40, 2), null)
+})
+
+test("technical analysis MVP: SMA, RSI, support/resistance, explanation", () => {
+  const s = Array.from({ length: 30 }, (_, i) => ({ t: i, c: 100 + i }))
+  const candles = s.map((p, i) => ({ t: p.t, o: p.c - 1, h: p.c + 1, l: p.c - 2, c: p.c, v: 1000 + i * 10 }))
+  assert.equal(Model.smaValue(Model.closeValues(s), 20), 119.5)
+  assert.equal(Model.smaSeries(s, 20).length, 11)
+  assert.equal(Model.rsiValue(Model.closeValues(s), 14), 100)
+  assert.deepEqual(Model.supportResistance(s, 30), { support: 100, resistance: 129 })
+  assert.equal(Model.averageVolume(candles, 20), 1195)
+  const q = quote("TEST", 129, 128)
+  q.series = s; q.candles = candles
+  const summary = Model.technicalSummary(q, s, candles)
+  assert.equal(summary.available, true)
+  assert.equal(summary.sma20, 119.5)
+  assert.equal(summary.support, 100)
+  assert.ok(summary.lines.join("\n").includes("TEST is in an uptrend"))
+  assert.equal(Model.technicalSummary(q, [{ t: 1, c: 1 }], []).available, false)
 })
 
 test("tapeItems: valid quotes only, compact form, down flag", () => {
