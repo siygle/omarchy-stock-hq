@@ -600,8 +600,399 @@ function convertAll(quotes, display, rates) {
   return out
 }
 
+// ---- Level-1 metrics. Everything derives from fields the chart endpoint's
+//      meta already carries, so the dense table costs no extra requests.
+
+// 0..1 position of `value` between low and high (clamped); null when unknown.
+function rangePosition(value, low, high) {
+  var v = toNumber(value)
+  var lo = toNumber(low)
+  var hi = toNumber(high)
+  if (v === null || lo === null || hi === null || hi < lo) return null
+  if (hi === lo) return 0.5
+  var p = (v - lo) / (hi - lo)
+  return p < 0 ? 0 : (p > 1 ? 1 : p)
+}
+
+function pctOf(delta, base) {
+  var b = toNumber(base)
+  if (delta === null || b === null || b === 0) return null
+  return (delta / b) * 100
+}
+
+// Opening gap versus the previous close, in percent.
+function gapPct(quote) {
+  if (!quote) return null
+  var o = toNumber(quote.open)
+  var p = toNumber(quote.prevClose)
+  return o === null || p === null ? null : pctOf(o - p, p)
+}
+
+// Day's high-low span relative to the previous close, in percent.
+function dayRangePct(quote) {
+  if (!quote) return null
+  var hi = toNumber(quote.dayHigh)
+  var lo = toNumber(quote.dayLow)
+  return hi === null || lo === null ? null : pctOf(hi - lo, quote.prevClose)
+}
+
+// Distance below the 52-week high, in percent (<= 0).
+function offHighPct(quote) {
+  if (!quote) return null
+  var price = toNumber(quote.price)
+  var hi = toNumber(quote.week52High)
+  return price === null || hi === null ? null : pctOf(price - hi, hi)
+}
+
+// "+1.23%" / "-0.40%" for table cells; "" when unknown.
+function formatSignedPct(value) {
+  var n = toNumber(value)
+  if (n === null) return ""
+  return (n < 0 ? "-" : "+") + Math.abs(n).toFixed(2) + "%"
+}
+
+function formatSignedNumber(value, price) {
+  var n = toNumber(value)
+  if (n === null) return ""
+  var decimals = toNumber(price) !== null ? priceDecimals(toNumber(price)) : 2
+  return (n < 0 ? "-" : "+") + Math.abs(n).toFixed(decimals)
+}
+
+// Advancers / decliners / average change across the valid quotes.
+function marketSummary(quotes) {
+  var list = quotes || []
+  var up = 0
+  var down = 0
+  var sum = 0
+  var counted = 0
+  for (var i = 0; i < list.length; i++) {
+    if (!isValid(list[i])) continue
+    if (isUp(list[i])) up++
+    else if (isDown(list[i])) down++
+    var pct = toNumber(list[i].changePct)
+    if (pct !== null) {
+      sum += pct
+      counted++
+    }
+  }
+  return { up: up, down: down, flat: validCount(list) - up - down, avgPct: counted ? sum / counted : null }
+}
+
+var SORT_KEYS = ["symbol", "price", "change", "changePct", "dayPos", "gap", "range", "week52Pos", "offHigh", "volume"]
+
+function normalizeSortKey(value) {
+  var s = trimString(value)
+  return SORT_KEYS.indexOf(s) === -1 ? "" : s
+}
+
+function metric(quote, key) {
+  if (!quote) return null
+  switch (key) {
+  case "symbol": return String(quote.symbol || "")
+  case "price": return toNumber(quote.price)
+  case "change": return toNumber(quote.change)
+  case "changePct": return toNumber(quote.changePct)
+  case "dayPos": return rangePosition(quote.price, quote.dayLow, quote.dayHigh)
+  case "gap": return gapPct(quote)
+  case "range": return dayRangePct(quote)
+  case "week52Pos": return rangePosition(quote.price, quote.week52Low, quote.week52High)
+  case "offHigh": return offHighPct(quote)
+  case "volume": return toNumber(quote.volume)
+  }
+  return null
+}
+
+// Stable sort by `key`; invalid quotes and unknown values always go last.
+// An empty key keeps the watchlist order.
+function sortQuotes(quotes, key, desc) {
+  var list = (quotes || []).slice()
+  var k = normalizeSortKey(key)
+  if (k === "") return list
+  var decorated = []
+  for (var i = 0; i < list.length; i++) {
+    var v = isValid(list[i]) ? metric(list[i], k) : null
+    decorated.push({ q: list[i], v: v, i: i })
+  }
+  decorated.sort(function(a, b) {
+    var an = a.v === null || a.v === ""
+    var bn = b.v === null || b.v === ""
+    if (an !== bn) return an ? 1 : -1
+    if (!an && a.v !== b.v) {
+      var cmp = typeof a.v === "string" ? (a.v < b.v ? -1 : 1) : a.v - b.v
+      return desc ? -cmp : cmp
+    }
+    return a.i - b.i
+  })
+  var out = []
+  for (var j = 0; j < decorated.length; j++) out.push(decorated[j].q)
+  return out
+}
+
+// ---- Watchlist sync through a GitHub gist (via the signed-in `gh` CLI).
+
+var DEFAULT_GIST_FILE = "stocks.json"
+
+function normalizeGistId(value) {
+  var s = trimString(value)
+  // Accept a full gist URL too: https://gist.github.com/<user>/<id>
+  var m = s.match(/([0-9a-f]{20,})\/?$/i)
+  return m ? m[1] : ""
+}
+
+function normalizeGistFile(value) {
+  var s = trimString(value)
+  return s === "" || /[\/\\]/.test(s) ? DEFAULT_GIST_FILE : s
+}
+
+function gistUrl(id) {
+  return "https://gist.github.com/" + String(id || "")
+}
+
+// Gist content -> symbol list (possibly empty). Accepts a JSON array, a JSON
+// object with `symbols`, or plain text (one symbol per line or comma/space
+// separated, `#` starts a comment) so editing on the web is forgiving.
+function parseWatchlist(text) {
+  var raw = trimString(text)
+  if (raw === "" || raw === "null") return []
+  var list = null
+  try {
+    var data = JSON.parse(raw)
+    if (Array.isArray(data)) list = data
+    else if (data && Array.isArray(data.symbols)) list = data.symbols
+    else if (data !== null && typeof data === "object") list = []
+  } catch (e) {
+    list = null
+  }
+  if (list === null) {
+    list = []
+    var lines = raw.split("\n")
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i].replace(/#.*$/, "")
+      var parts = line.split(/[\s,;]+/)
+      for (var j = 0; j < parts.length; j++) list.push(parts[j])
+    }
+  }
+  var out = []
+  for (var k = 0; k < list.length; k++) {
+    if (typeof list[k] !== "string" && typeof list[k] !== "number") continue
+    var symbol = trimString(list[k]).toUpperCase()
+    if (symbol === "" || out.indexOf(symbol) !== -1) continue
+    out.push(symbol)
+  }
+  return out
+}
+
+function serializeWatchlist(symbols) {
+  return JSON.stringify({ symbols: symbols || [] }, null, 2) + "\n"
+}
+
+function gistBody(file, symbols) {
+  var files = {}
+  files[normalizeGistFile(file)] = { content: serializeWatchlist(symbols) }
+  return JSON.stringify({ files: files })
+}
+
+// Every gh call runs through one sh wrapper that folds stderr into the output
+// and prints the exit code on the first line, so a single stdout collector
+// sees both the result and the reason it failed (no stdout/stderr ordering
+// races). Values reach the script only as positional args.
+function ghCommand(script, args) {
+  return ["sh", "-c", "out=$({ " + script + "; } 2>&1); code=$?; printf '%s\\n%s' \"$code\" \"$out\"", "sh"].concat(args || [])
+}
+
+// Wrapper stdout -> { code, output }; a missing/garbled status line is code -1.
+function parseCommandResult(text) {
+  var raw = String(text || "")
+  var nl = raw.indexOf("\n")
+  var head = nl === -1 ? raw : raw.slice(0, nl)
+  var code = /^\d+$/.test(trimString(head)) ? parseInt(head, 10) : -1
+  return { code: code, output: nl === -1 ? "" : raw.slice(nl + 1) }
+}
+
+// Readable reason for a failed gh call. gh prints the API's JSON error body on
+// stdout (no trailing newline) and then "gh: Not Found (HTTP 404)" on stderr,
+// so prefer that "gh: " line, then the JSON message, then the first line.
+function commandError(result) {
+  if (result.code === 127) return "gh CLI not found"
+  var output = String(result.output || "")
+  var at = output.lastIndexOf("gh: ")
+  if (at !== -1) return trimString(output.slice(at + 4).split("\n")[0])
+  var m = output.match(/"message"\s*:\s*"([^"]*)"/)
+  if (m) return m[1]
+  var lines = output.split("\n")
+  for (var i = 0; i < lines.length; i++) {
+    if (trimString(lines[i]) !== "") return trimString(lines[i])
+  }
+  return "gh exited with " + result.code
+}
+
+function gistPullCommand(id, file) {
+  return ghCommand("gh api \"gists/$1\" --jq \"$2\"",
+    [normalizeGistId(id), ".files[" + JSON.stringify(normalizeGistFile(file)) + "].content"])
+}
+
+// The JSON body goes through stdin (`--input -`) so file names and content
+// never need gh's `-f key[sub]=value` escaping.
+function gistPushCommand(id, file, symbols) {
+  return ghCommand("printf '%s' \"$2\" | gh api -X PATCH \"gists/$1\" --input - --jq .id",
+    [normalizeGistId(id), gistBody(file, symbols)])
+}
+
+function gistCreateCommand(file, symbols) {
+  var body = JSON.parse(gistBody(file, symbols))
+  body.public = false
+  body.description = "omarchy-stocks watchlist"
+  return ghCommand("printf '%s' \"$1\" | gh api -X POST gists --input - --jq .id", [JSON.stringify(body)])
+}
+
+// ---- Local agent runs.
+
+var DEFAULT_AGENT_COMMAND = ["claude", "-p", "--allowedTools=WebSearch,WebFetch", "{prompt}"]
+
+var DEFAULT_AGENT_PROMPTS = [
+  { name: "Quick take", prompt: "You are an equity research assistant. Give a concise take on {name} ({symbol}, {exchange}). Latest quote data: {quote}. Cover what moved it recently, key price levels, main risks, and finish with a one-line verdict. Markdown, under 250 words." },
+  { name: "Technical", prompt: "Do a technical analysis of {symbol} ({name}). Price {price} {currency}, day range {dayLow}-{dayHigh}, 52-week range {week52Low}-{week52High}, volume {volume}. Look up recent daily price action and discuss trend, support/resistance, momentum and volume. Markdown with short sections." },
+  { name: "News & catalysts", prompt: "Search the news from the last two weeks about {name} ({symbol}) and list upcoming catalysts (earnings date, product events, macro). Markdown bullets with dates and sources." }
+]
+
+function normalizeAgentCommand(value) {
+  var list = []
+  if (Array.isArray(value)) list = value
+  else if (typeof value === "string") list = trimString(value).split(/\s+/)
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var s = String(list[i] === null || list[i] === undefined ? "" : list[i])
+    if (s !== "") out.push(s)
+  }
+  return out.length ? out : DEFAULT_AGENT_COMMAND.slice()
+}
+
+function normalizeAgentPrompts(value) {
+  var list = Array.isArray(value) ? value : []
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var p = list[i]
+    if (!p || typeof p !== "object") continue
+    var name = trimString(p.name)
+    var prompt = trimString(p.prompt)
+    if (name === "" || prompt === "") continue
+    out.push({ name: name, prompt: prompt })
+  }
+  return out.length ? out : DEFAULT_AGENT_PROMPTS.slice()
+}
+
+function quoteSummary(quote) {
+  if (!quote) return {}
+  var out = {}
+  var keys = ["symbol", "name", "exchange", "currency", "price", "prevClose", "change", "changePct", "open",
+    "dayLow", "dayHigh", "week52Low", "week52High", "volume", "marketTime"]
+  for (var i = 0; i < keys.length; i++) {
+    var v = quote[keys[i]]
+    if (v === null || v === undefined || v === "") continue
+    out[keys[i]] = typeof v === "number" ? Number(v.toFixed(4)) : v
+  }
+  return out
+}
+
+// Replaces {symbol} {name} {price} ... and {quote} (compact JSON of the quote).
+// Unknown placeholders are left as typed.
+function fillPrompt(template, quote) {
+  var q = quote || {}
+  return String(template || "").replace(/\{([A-Za-z0-9]+)\}/g, function(match, key) {
+    if (key === "quote") return JSON.stringify(quoteSummary(q))
+    if (key === "changePct") return formatSignedPct(q.changePct)
+    if (key === "change") return formatSignedNumber(q.change, q.price)
+    if (key === "volume") return formatVolume(q.volume)
+    if (!(key in q)) return match
+    var v = q[key]
+    if (v === null || v === undefined) return ""
+    if (typeof v === "number") return formatPrice(v)
+    return String(v)
+  })
+}
+
+// Command template -> argv with `{prompt}` substituted (appended when absent).
+function agentArgv(command, prompt) {
+  var base = normalizeAgentCommand(command)
+  var out = []
+  var used = false
+  for (var i = 0; i < base.length; i++) {
+    if (base[i].indexOf("{prompt}") !== -1) {
+      out.push(base[i].split("{prompt}").join(String(prompt)))
+      used = true
+    } else {
+      out.push(base[i])
+    }
+  }
+  if (!used) out.push(String(prompt))
+  return out
+}
+
+// File-system safe name for a symbol's cached analysis ("^GSPC" -> "_GSPC").
+function agentFileName(symbol) {
+  return String(symbol || "").replace(/[^A-Za-z0-9.=-]/g, "_") + ".md"
+}
+
+// Cached analysis file: one HTML-comment header line carrying the run's
+// metadata, then the agent's raw output.
+function agentFileText(meta, output) {
+  var m = meta || {}
+  return "<!-- omarchy-stocks " + JSON.stringify({ prompt: String(m.prompt || ""), at: toNumber(m.at) }) + " -->\n" + String(output || "")
+}
+
+function parseAgentFile(text) {
+  var raw = String(text || "")
+  var m = raw.match(/^<!-- omarchy-stocks (\{.*\}) -->\n?/)
+  if (!m) return { prompt: "", at: null, output: raw }
+  var meta = {}
+  try { meta = JSON.parse(m[1]) || {} } catch (e) { meta = {} }
+  return { prompt: String(meta.prompt || ""), at: toNumber(meta.at), output: raw.slice(m[0].length) }
+}
+
+function formatElapsed(seconds) {
+  var s = Math.max(0, Math.floor(toNumber(seconds) || 0))
+  var m = Math.floor(s / 60)
+  var r = s % 60
+  return m + ":" + (r < 10 ? "0" : "") + r
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
+    rangePosition: rangePosition,
+    gapPct: gapPct,
+    dayRangePct: dayRangePct,
+    offHighPct: offHighPct,
+    formatSignedPct: formatSignedPct,
+    formatSignedNumber: formatSignedNumber,
+    marketSummary: marketSummary,
+    SORT_KEYS: SORT_KEYS,
+    normalizeSortKey: normalizeSortKey,
+    metric: metric,
+    sortQuotes: sortQuotes,
+    DEFAULT_GIST_FILE: DEFAULT_GIST_FILE,
+    normalizeGistId: normalizeGistId,
+    normalizeGistFile: normalizeGistFile,
+    gistUrl: gistUrl,
+    parseWatchlist: parseWatchlist,
+    serializeWatchlist: serializeWatchlist,
+    gistBody: gistBody,
+    ghCommand: ghCommand,
+    parseCommandResult: parseCommandResult,
+    commandError: commandError,
+    gistPullCommand: gistPullCommand,
+    gistPushCommand: gistPushCommand,
+    gistCreateCommand: gistCreateCommand,
+    DEFAULT_AGENT_COMMAND: DEFAULT_AGENT_COMMAND,
+    DEFAULT_AGENT_PROMPTS: DEFAULT_AGENT_PROMPTS,
+    normalizeAgentCommand: normalizeAgentCommand,
+    normalizeAgentPrompts: normalizeAgentPrompts,
+    quoteSummary: quoteSummary,
+    fillPrompt: fillPrompt,
+    agentArgv: agentArgv,
+    agentFileName: agentFileName,
+    agentFileText: agentFileText,
+    parseAgentFile: parseAgentFile,
+    formatElapsed: formatElapsed,
     DEFAULT_SYMBOLS: DEFAULT_SYMBOLS,
     normalizeSymbols: normalizeSymbols,
     refreshMinutes: refreshMinutes,

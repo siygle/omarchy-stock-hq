@@ -2,8 +2,17 @@
 
 A Wall-Street-style ticker tape for the Omarchy Quattro bar. The tape scrolls
 your symbols (`AAPL 305.59 ▲0.42%  •  NVDA …`) in the theme's green/red; click
-it for a panel with sparklines, a detail chart with range selector, key stats
-and a currency switch. Quotes and FX rates come from Yahoo Finance — no API key.
+it for a two-level panel:
+
+- **Level 1** — a dense, sortable table: last, change, change %, day-range bar,
+  opening gap, day span, 52-week position, distance off the 52-week high,
+  volume, 1D sparkline and last trade time, plus an advancers/decliners summary.
+- **Level 2** — one symbol: chart with range selector, full stats, and a local
+  AI agent (Claude Code, Codex, Gemini, … ) that analyses the symbol in the
+  background with preset or custom prompts.
+
+The watchlist can sync with a GitHub gist, so you can also edit it on the web.
+Quotes and FX rates come from Yahoo Finance — no API key.
 
 ![preview](preview.png)
 
@@ -26,12 +35,53 @@ omarchy bar move io.github.5d0tal1gat0r.stocks --section right
 | tape | left click | open / close the panel (Esc closes, Tab switches panels) |
 | tape | middle click | refresh now |
 | tape | right click / hover | pause the tape (hover pauses while pointing) |
-| panel | `1D 5D 1M 6M 1Y` | chart range (persisted) |
-| panel | `USD ⇄` chip | left click: next currency · right click: previous · `Native` = each quote in its own currency |
-| panel | click a row | show that symbol's chart and stats |
-| panel | `Open on Yahoo Finance ↗` | open the selected symbol in your browser |
+| table | click a row / `j` `k` + Enter | open that symbol (level 2); Esc or `h` goes back |
+| table | click a column header | sort descending → ascending → watchlist order (persisted) |
+| table | `Add symbols` field | add one or more symbols (`tsm, 2330.TW`) |
+| table | hover a row, `×` | remove the symbol |
+| table | `USD ⇄` chip | left click: next currency · right click: previous · `Native` = each quote in its own currency |
+| table | `Create sync gist` / `Sync` / `Open gist ↗` | see [Gist sync](#gist-sync) |
+| detail | `1D 5D 1M 6M 1Y` | chart range (persisted) |
+| detail | agent preset chips / custom prompt field | run the agent on this symbol, see [Agent](#agent) |
+| detail | `Open on Yahoo Finance ↗` | open the symbol in your browser |
 
-IPC (for keybindings): `omarchy-shell io.github.5d0tal1gat0r.stocks toggle|open|close|refresh|pause`
+IPC (for keybindings): `omarchy-shell io.github.5d0tal1gat0r.stocks toggle|open|close|refresh|pause|sync`,
+`… detail <SYMBOL>` (open level 2) and `… analyze <SYMBOL>` (open level 2 and run the first agent preset).
+
+## Gist sync
+
+Click `Create sync gist` in the panel footer: a secret gist holding
+`stocks.json` is created with your current list and its id is stored as
+`gistId`. Or point at an existing gist:
+
+```sh
+omarchy bar set io.github.5d0tal1gat0r.stocks gistId https://gist.github.com/<you>/<id>
+```
+
+Every refresh pulls the gist; an edit made on gist.github.com replaces the
+local list, and adding/removing symbols in the panel pushes straight back. The
+gist wins when both sides changed (and on shell start). The file may be
+`{"symbols": [...]}`, a JSON array, or plain text — one symbol per line or
+comma separated, `#` for comments. All calls go through the signed-in `gh` CLI
+(`gh auth login`); no token is stored by the widget.
+
+## Agent
+
+Level 2 runs a local agent CLI in the background on the shown symbol, streams
+its answer into the panel (rendered as Markdown), and keeps the latest answer
+per symbol in `~/.cache/omarchy-stocks/agent/<SYMBOL>.md`. One run at a time;
+`Cancel` stops it.
+
+```sh
+# the default; any CLI that takes a prompt argument and prints the answer works
+omarchy bar set io.github.5d0tal1gat0r.stocks agentCommand '["claude","-p","--allowedTools=WebSearch,WebFetch","{prompt}"]' --json
+omarchy bar set io.github.5d0tal1gat0r.stocks agentCommand '["codex","exec","{prompt}"]' --json
+omarchy bar set io.github.5d0tal1gat0r.stocks agentPrompts '[{"name":"繁中快評","prompt":"用繁體中文分析 {name} ({symbol})，最新報價：{quote}"}]' --json
+```
+
+Prompts (presets and the custom field) can use `{symbol} {name} {exchange}
+{currency} {price} {change} {changePct} {dayLow} {dayHigh} {week52Low}
+{week52High} {volume}` and `{quote}` (all quote fields as JSON).
 
 ## Configure
 
@@ -57,6 +107,11 @@ omarchy bar set io.github.5d0tal1gat0r.stocks compact true --json    # "AAPL ▲
 | `currency` | `""` (native) | show every price in this currency, e.g. `EUR` (the panel chip sets this) |
 | `currencies` | `["USD","EUR","GBP","JPY","CHF"]` | what the currency chip cycles through |
 | `upColor` / `downColor` | theme `green` / `red` | override the tints with a hex color, e.g. `"#a6e3a1"` |
+| `sortKey` / `sortDesc` | `""` / `true` | table sort (the column headers set these); `""` = watchlist order |
+| `gistId` | `""` (off) | gist id or URL for watchlist sync |
+| `gistFile` | `stocks.json` | file inside the gist |
+| `agentCommand` | `["claude","-p","--allowedTools=WebSearch,WebFetch","{prompt}"]` | agent argv; `{prompt}` is replaced (appended when absent) |
+| `agentPrompts` | Quick take / Technical / News & catalysts | `[{"name": …, "prompt": …}]` preset chips |
 
 Unknown symbols show as `Not Found` in the panel and are left out of the tape.
 Colors follow the current theme's `colors.toml`; themes without a `green` get a
@@ -68,7 +123,7 @@ Clone this repository (or your fork), then from its root:
 
 ```sh
 node --test test/model.test.js                              # Model.js unit tests
-qmllint -I /usr/share/omarchy/shell Panel.qml
+/usr/lib/qt6/bin/qmllint -I /usr/share/omarchy/shell *.qml
 omarchy plugin validate "$PWD"
 omarchy plugin add "$PWD" --enable                          # installs a clone into ~/.config/omarchy/plugins/
 rsync -a --delete --exclude .git ./ ~/.config/omarchy/plugins/io.github.5d0tal1gat0r.stocks/
@@ -77,7 +132,10 @@ qs log -p /usr/share/omarchy/shell --tail 100               # shell log
 ```
 
 `Model.js` holds every piece of logic that does not need QML (parsing, formatting,
-conversion, chart geometry) so it can be tested with plain Node.
+conversion, chart geometry, table metrics, gist and agent commands) so it can be
+tested with plain Node. `Panel.qml` owns the state; `QuoteTable.qml` (level 1)
+and `DetailView.qml` (level 2) render it; `GistSync.qml` and `AgentRunner.qml`
+wrap the `gh` and agent processes.
 
 ## Remove
 
