@@ -3,8 +3,9 @@ import qs.Commons
 import qs.Ui
 import "Model.js" as Model
 
-// Level 2: one symbol with the range chart, full stats and the local agent
-// (preset or custom prompt, run in the background, answer rendered here).
+// Level 2: one symbol with the range chart (SMA20 and support/resistance
+// overlays), technical notes, full stats and the local agent (preset or
+// custom prompt, run in the background, answer rendered here).
 Column {
   id: detail
 
@@ -16,6 +17,8 @@ Column {
   readonly property bool valid: Model.isValid(quote)
   readonly property var series: valid ? stocks.seriesFor(quote) : []
   readonly property var bounds: Model.seriesBounds(series)
+  readonly property var analysis: stocks.analysisFor(quote, series)
+  readonly property var sma20Series: Model.smaSeries(series, 20)
   readonly property real statLabelWidth: Style.space(92)
   readonly property real statValueWidth: (width - Style.space(16)) / 2 - statLabelWidth
 
@@ -156,6 +159,12 @@ Column {
       pad: 4
       fill: true
       referenceValue: detail.stocks.activeRange === "1d" && detail.quote ? detail.quote.prevClose : null
+      overlaySeries: detail.sma20Series
+      overlayColor: detail.stocks.mutedForeground
+      supportValue: detail.analysis.support
+      resistanceValue: detail.analysis.resistance
+      supportColor: detail.stocks.upColor
+      resistanceColor: detail.stocks.downColor
     }
 
     Text {
@@ -208,6 +217,47 @@ Column {
       color: detail.stocks.mutedForeground
       font.family: detail.stocks.fontFamily
       font.pixelSize: Style.font.caption
+    }
+  }
+
+  // ---- Technical notes (SMA20 / SMA50 / RSI14 / levels / volume).
+  Column {
+    width: parent.width
+    spacing: Style.space(3)
+
+    Text {
+      leftPadding: Style.space(8)
+      text: "Technical analysis"
+      color: detail.stocks.barForeground
+      font.family: detail.stocks.fontFamily
+      font.pixelSize: Style.font.body
+      font.bold: true
+    }
+
+    Repeater {
+      model: detail.analysis.lines
+
+      Text {
+        required property string modelData
+        width: parent.width
+        leftPadding: Style.space(8)
+        rightPadding: Style.space(8)
+        text: "• " + modelData
+        wrapMode: Text.WordWrap
+        color: detail.stocks.mutedForeground
+        font.family: detail.stocks.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+    }
+
+    Text {
+      visible: detail.sma20Series.length >= 2
+      leftPadding: Style.space(8)
+      text: "Dotted line: SMA20 · green/red dashed: recent support/resistance"
+      color: detail.stocks.mutedForeground
+      font.family: detail.stocks.fontFamily
+      font.pixelSize: Style.font.caption
+      font.italic: true
     }
   }
 

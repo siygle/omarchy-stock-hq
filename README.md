@@ -1,22 +1,31 @@
-# Stock HQ for Omarchy
+# Omarchy Stock HQ
 
 > Fork of [5d0tal1gat0r/omarchy-stocks](https://github.com/5d0tal1gat0r/omarchy-stocks)
-> that adds a quant-dense quote table, a local AI agent per symbol and a
-> gist-synced watchlist. See [Credits](#credits).
+> that adds multiple watchlists, a quant-dense quote table, technical
+> analysis, a local AI agent per symbol and gist-synced watchlists. All
+> original stock ticker implementation credit goes to the upstream project and
+> its author; see [Credits](#credits).
 
 A Wall-Street-style ticker tape for the Omarchy Quattro bar. The tape scrolls
 your symbols (`AAPL 305.59 ▲0.42%  •  NVDA …`) in the theme's green/red; click
 it for a two-level panel:
 
-- **Level 1** — a dense, sortable table: last, change, change %, day-range bar,
-  opening gap, day span, 52-week position, distance off the 52-week high,
-  volume, 1D sparkline and last trade time, plus an advancers/decliners summary.
-- **Level 2** — one symbol: chart with range selector, full stats, and a local
-  AI agent (Claude Code, Codex, Gemini, … ) that analyses the symbol in the
-  background with preset or custom prompts.
+- **Level 1** — the active watchlist as a dense, sortable table: last, change,
+  change %, day-range bar, opening gap, day span, 52-week position, distance
+  off the 52-week high, volume, 1D sparkline and last trade time, plus an
+  advancers/decliners summary. Switch, create, rename and delete watchlists;
+  add, edit and remove symbols inline.
+- **Level 2** — one symbol: chart with range selector, SMA20 and
+  support/resistance overlays, plain-English technical notes (trend, SMA20/50,
+  RSI14, volume), full stats, and a local AI agent (Claude Code, Codex,
+  Gemini, …) that analyses the symbol in the background with preset or custom
+  prompts.
 
-The watchlist can sync with a GitHub gist, so you can also edit it on the web.
-Quotes and FX rates come from Yahoo Finance — no API key.
+Watchlists live in a JSON file you can import/export, and can sync with a
+GitHub gist so you can also edit them on the web. Taiwan and other Asian
+markets work too (`2330.TW` or `TW:2330`). Quotes and FX rates come from Yahoo
+Finance — no API key — and are cached so the panel shows the last known data
+right after a shell restart.
 
 **Level 1: every symbol at a glance.** Sort by any column; the bars show where
 the price sits in the day's range (tick = previous close) and in its 52-week range.
@@ -36,8 +45,8 @@ omarchy plugin add https://github.com/siygle/omarchy-stock-hq.git --enable
 
 The plugin id is `io.github.siygle.stock-hq`, so it installs next to the
 upstream `io.github.5d0tal1gat0r.stocks` widget instead of replacing it. If you
-are switching over, copy your settings (`symbols`, `currency`, …) across with
-`omarchy bar set` and remove the upstream plugin. Optional requirements: the
+are switching over, an upstream `symbols` setting seeds the first watchlist
+once you copy it across with `omarchy bar set`; then remove the upstream plugin. Optional requirements: the
 [`gh`](https://cli.github.com) CLI, signed in, for gist sync, and an agent CLI
 (`claude`, `codex`, `gemini`, …) for analysis.
 
@@ -56,21 +65,53 @@ omarchy bar move io.github.siygle.stock-hq --section right
 | tape | right click / hover | pause the tape (hover pauses while pointing) |
 | table | click a row / `j` `k` + Enter | open that symbol (level 2); Esc or `h` goes back |
 | table | click a column header | sort descending → ascending → watchlist order (persisted) |
-| table | `Add symbols` field | add one or more symbols (`tsm, 2330.TW`) |
-| table | hover a row, `×` | remove the symbol |
+| table | watchlist chips / `+ List` | switch lists or create another one |
+| table | list name field (Enter) / `Delete list` | rename or remove the active watchlist |
+| table | `Add symbols` field | add one or more symbols (`tsm, TW:2330`) |
+| table | hover a row, `✎` / `×` | edit (replace) or remove the symbol |
 | table | `USD ⇄` chip | left click: next currency · right click: previous · `Native` = each quote in its own currency |
+| table | `⟳` | refresh all quotes now |
+| table | `⚙` | settings: refresh interval, `Export` / `Import` / `Open JSON ↗` for the watchlists file |
 | table | `Create sync gist` / `Sync` / `Open gist ↗` | see [Gist sync](#gist-sync) |
-| detail | `1D 5D 1M 6M 1Y` | chart range (persisted) |
+| detail | `1D 5D 1M 6M 1Y` | chart range (persisted); the technical notes follow it |
 | detail | agent preset chips / custom prompt field | run the agent on this symbol, see [Agent](#agent) |
 | detail | `Open on Yahoo Finance ↗` | open the symbol in your browser |
 
 IPC (for keybindings): `omarchy-shell io.github.siygle.stock-hq toggle|open|close|refresh|pause|sync`,
 `… detail <SYMBOL>` (open level 2) and `… analyze <SYMBOL>` (open level 2 and run the first agent preset).
 
+## Watchlists
+
+Watchlists live in a JSON definition file, not in `shell.json`:
+
+```sh
+$EDITOR ~/.local/share/omarchy-stock-hq/watchlists.json   # picked up on save
+```
+
+```json
+{
+  "version": 1,
+  "activeWatchlist": 0,
+  "watchlists": [
+    { "name": "Main", "symbols": ["AAPL", "NVDA", "SPCX", "GOOGL"] },
+    { "name": "Taiwan", "symbols": ["2330.TW", "0050.TW"] }
+  ]
+}
+```
+
+The panel edits this file; `⚙` → `Export` writes a dated copy to a folder you
+pick and `Import` loads one. Until the file exists, the widget's `watchlists`
+or `symbols` setting seeds it.
+
+Native Yahoo symbols work everywhere (`2330.TW`, `6488.TWO`, `0700.HK`,
+`7203.T`, `005930.KS`), and the add field also accepts shortcuts like
+`TW:2330`, `tw2330`, `TWO:6488`, `HK:0700`, `JP:7203`, `KR:005930`,
+`SH:600519`, `SZ:000001`, `SG:D05` and `AU:BHP`.
+
 ## Gist sync
 
 Click `Create sync gist` in the panel footer: a secret gist holding
-`stocks.json` is created with your current list and its id is stored as
+`stocks.json` is created with all your watchlists and its id is stored as
 `gistId`. Or point at an existing gist:
 
 ```sh
@@ -78,10 +119,11 @@ omarchy bar set io.github.siygle.stock-hq gistId https://gist.github.com/<you>/<
 ```
 
 Every refresh pulls the gist; an edit made on gist.github.com replaces the
-local list, and adding/removing symbols in the panel pushes straight back. The
-gist wins when both sides changed (and on shell start). The file may be
-`{"symbols": [...]}`, a JSON array, or plain text — one symbol per line or
-comma separated, `#` for comments. All calls go through the signed-in `gh` CLI
+local watchlists, and every edit in the panel (or an import) pushes straight
+back. The gist wins when both sides changed (and on shell start). Which list
+is active stays per machine. The gist file uses the `watchlists.json` shape;
+`{"symbols": [...]}`, a JSON array, or plain text (one symbol per line or comma
+separated, `#` for comments) also work and become a single "Main" list. All calls go through the signed-in `gh` CLI
 (`gh auth login`); no token is stored by the widget.
 
 ## Agent
@@ -105,15 +147,16 @@ Quick take preset) carry the data themselves and are sent as written.
 
 Prompts (presets and the custom field) can also use `{symbol} {name} {exchange}
 {currency} {price} {change} {changePct} {dayLow} {dayHigh} {week52Low}
-{week52High} {volume}` and `{quote}` (all quote fields as JSON).
+{week52High} {volume}` and `{quote}` (all quote fields, plus the technical
+notes for the chart range on screen, as JSON).
 
 ## Configure
 
-Settings live on the widget's entry in `~/.config/omarchy/shell.json` and apply
-instantly:
+UI preferences live on the widget's entry in `~/.config/omarchy/shell.json` and
+apply instantly. Fetched quotes and charts are cached separately in
+`~/.local/state/omarchy-stock-hq/cache.json`.
 
 ```sh
-omarchy bar set io.github.siygle.stock-hq symbols '["AAPL","MSFT","BTC-USD","^GSPC"]' --json
 omarchy bar set io.github.siygle.stock-hq tickerWidth 260
 omarchy bar set io.github.siygle.stock-hq scrollSpeed 30
 omarchy bar set io.github.siygle.stock-hq currency EUR
@@ -122,8 +165,9 @@ omarchy bar set io.github.siygle.stock-hq compact true --json    # "AAPL ▲0.42
 
 | key | default | meaning |
 |-----|---------|---------|
-| `symbols` | `["AAPL","NVDA","SPCX","GOOGL"]` | any Yahoo Finance symbols (stocks, ETFs, `BTC-USD`, `EURUSD=X`, `^GSPC`); a comma-separated string also works |
-| `refreshMinutes` | `5` | quote refresh interval (minimum 1) |
+| `watchlistsPath` | `~/.local/share/omarchy-stock-hq/watchlists.json` | another watchlists definition file |
+| `symbols` / `watchlists` | `["AAPL","NVDA","SPCX","GOOGL"]` | only seed `watchlists.json` when it does not exist yet |
+| `refreshMinutes` | `5` | quote refresh interval (minimum 1; `⚙` sets it) |
 | `tickerWidth` | `180` | tape width in px (minimum 80) |
 | `scrollSpeed` | `20` | tape speed in px/s; `0` = static |
 | `compact` | `false` | drop the price from the tape |
@@ -156,8 +200,8 @@ qs log -p /usr/share/omarchy/shell --tail 100               # shell log
 ```
 
 `Model.js` holds every piece of logic that does not need QML (parsing, formatting,
-conversion, chart geometry, table metrics, gist and agent commands) so it can be
-tested with plain Node. `Panel.qml` owns the state; `QuoteTable.qml` (level 1)
+conversion, chart geometry, watchlists, technical indicators, table metrics,
+gist and agent commands) so it can be tested with plain Node. `Panel.qml` owns the state; `QuoteTable.qml` (level 1)
 and `DetailView.qml` (level 2) render it; `GistSync.qml` and `AgentRunner.qml`
 wrap the `gh` and agent processes.
 
@@ -173,8 +217,9 @@ Built on [omarchy-stocks](https://github.com/5d0tal1gat0r/omarchy-stocks) by
 [@5d0tal1gat0r](https://github.com/5d0tal1gat0r). This fork reuses its whole
 foundation: the ticker tape, the Yahoo Finance fetching and parsing, currency
 conversion, chart geometry, theming and the test suite. Thank you! This fork
-adds the level-1 quote table, the level-2 view with the local agent runner,
-and gist sync.
+adds multiple watchlists with import/export, Asian market symbols, the quote
+cache, technical analysis, the level-1 quote table, the level-2 view with the
+local agent runner, and gist sync.
 
 ## License
 

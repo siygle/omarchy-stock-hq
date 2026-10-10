@@ -5,6 +5,25 @@
 
 var DEFAULT_SYMBOLS = ["AAPL", "NVDA", "SPCX", "GOOGL"]
 
+// Free quote source: Yahoo Finance's chart endpoint already covers many Asian
+// markets. Users may enter native Yahoo symbols (2330.TW, 0700.HK, 7203.T) or
+// friendlier market-prefixed forms below.
+var ASIA_MARKET_SUFFIXES = {
+  "TW": ".TW", "TPE": ".TW",       // Taiwan Stock Exchange, e.g. TW:2330 -> 2330.TW
+  "TWO": ".TWO", "TPEX": ".TWO",   // Taipei Exchange, e.g. TWO:6488 -> 6488.TWO
+  "HK": ".HK", "HKG": ".HK",       // Hong Kong, e.g. HK:0700 -> 0700.HK
+  "JP": ".T", "TYO": ".T",         // Tokyo, e.g. JP:7203 -> 7203.T
+  "KS": ".KS", "KR": ".KS",        // Korea Stock Exchange, e.g. KR:005930 -> 005930.KS
+  "KQ": ".KQ",                       // KOSDAQ
+  "SS": ".SS", "SH": ".SS",        // Shanghai
+  "SZ": ".SZ",                       // Shenzhen
+  "SI": ".SI", "SG": ".SI",        // Singapore
+  "BK": ".BK", "TH": ".BK",        // Thailand
+  "JK": ".JK", "ID": ".JK",        // Indonesia
+  "KL": ".KL", "MY": ".KL",        // Malaysia
+  "AX": ".AX", "AU": ".AX"         // Australia
+}
+
 function trimString(value) {
   return String(value === undefined || value === null ? "" : value).replace(/^\s+|\s+$/g, "")
 }
@@ -12,8 +31,25 @@ function trimString(value) {
 // Accepts a JSON array (the documented form) or a comma/space/semicolon
 // separated string (what `omarchy bar set ... symbols AAPL,NVDA` stores when
 // --json is forgotten). Anything else, or an empty result, means the defaults.
-function normalizeSymbols(value, fallback) {
-  var defaults = fallback || DEFAULT_SYMBOLS
+function normalizeSymbol(value) {
+  var symbol = trimString(value).toUpperCase()
+  if (symbol === "") return ""
+
+  // TW:2330 / HK:0700 / JP:7203 etc. -> Yahoo suffixes.
+  var prefixed = symbol.match(/^([A-Z]+)[:/](.+)$/)
+  if (prefixed && ASIA_MARKET_SUFFIXES[prefixed[1]]) {
+    var code = prefixed[2].replace(/\s+/g, "")
+    if (code !== "") return code + ASIA_MARKET_SUFFIXES[prefixed[1]]
+  }
+
+  // Common Taiwan shorthand: tw2330 / tw-2330 / tw.2330 -> 2330.TW.
+  var tw = symbol.match(/^TW[.\-_ ]?([0-9A-Z]+)$/)
+  if (tw) return tw[1] + ".TW"
+
+  return symbol
+}
+
+function listFromValue(value) {
   var list = []
   if (Array.isArray(value)) {
     list = value
@@ -22,14 +58,49 @@ function normalizeSymbols(value, fallback) {
   } else if (value && typeof value === "object" && typeof value.length === "number") {
     for (var k = 0; k < value.length; k++) list.push(value[k])
   }
+  return list
+}
 
+function normalizeSymbols(value, fallback) {
+  var defaults = fallback || DEFAULT_SYMBOLS
+  var list = listFromValue(value)
   var out = []
   for (var i = 0; i < list.length; i++) {
-    var symbol = trimString(list[i]).toUpperCase()
+    var symbol = normalizeSymbol(list[i])
     if (symbol === "" || out.indexOf(symbol) !== -1) continue
     out.push(symbol)
   }
   return out.length ? out : defaults.slice()
+}
+
+var DEFAULT_WATCHLIST_NAME = "Main"
+
+function normalizeWatchlists(value, fallbackSymbols) {
+  var out = []
+  var list = listFromValue(value)
+  for (var i = 0; i < list.length; i++) {
+    var item = list[i] || {}
+    var name = trimString(item.name || item.label || ("List " + (i + 1)))
+    var symbols = normalizeSymbols(item.symbols, [])
+    if (symbols.length) out.push({ name: name || ("List " + (i + 1)), symbols: symbols })
+  }
+  if (out.length) return out
+  return [{ name: DEFAULT_WATCHLIST_NAME, symbols: normalizeSymbols(fallbackSymbols, DEFAULT_SYMBOLS) }]
+}
+
+function activeWatchlistIndex(value, watchlists) {
+  var list = watchlists || []
+  if (!list.length) return 0
+  var n = parseInt(String(value), 10)
+  if (isNaN(n) || n < 0 || n >= list.length) return 0
+  return n
+}
+
+function cloneWatchlists(watchlists) {
+  var list = watchlists || []
+  var out = []
+  for (var i = 0; i < list.length; i++) out.push({ name: String(list[i].name || ("List " + (i + 1))), symbols: normalizeSymbols(list[i].symbols, []) })
+  return out
 }
 
 function refreshMinutes(value, fallback) {
@@ -91,7 +162,7 @@ function scrollSpeed(value, fallback) {
 // unknown symbol then still yields Yahoo's error JSON on its own line instead
 // of an empty line, which keeps the other symbols' lines aligned.
 function curlCommand(symbols, userAgent, range) {
-  var cmd = ["curl", "-sS", "--max-time", "10", "-A", String(userAgent || "omarchy-stocks"), "-w", "\n"]
+  var cmd = ["curl", "-sS", "--max-time", "10", "-A", String(userAgent || "omarchy-stock-hq"), "-w", "\n"]
   for (var i = 0; i < symbols.length; i++) cmd.push(chartUrl(symbols[i], range))
   return cmd
 }
@@ -128,22 +199,54 @@ function emptyQuote(symbol, error) {
     open: null,
     volume: null,
     series: [],
+    candles: [],
     error: String(error || "")
   }
+}
+
+function quoteBlock(result) {
+  return result && result.indicators && result.indicators.quote ? result.indicators.quote[0] : null
 }
 
 // timestamp[] + indicators.quote[0].close[] -> [{t, c}], nulls skipped
 // (Yahoo leaves the in-progress bar and market holidays as null).
 function parseSeries(result) {
   var stamps = result && result.timestamp ? result.timestamp : []
-  var quoteBlock = result && result.indicators && result.indicators.quote ? result.indicators.quote[0] : null
-  var closes = quoteBlock && quoteBlock.close ? quoteBlock.close : []
+  var block = quoteBlock(result)
+  var closes = block && block.close ? block.close : []
   var out = []
   for (var i = 0; i < stamps.length && i < closes.length; i++) {
     var t = toNumber(stamps[i])
     var c = toNumber(closes[i])
     if (t === null || c === null) continue
     out.push({ t: t, c: c })
+  }
+  return out
+}
+
+// Full OHLCV candles for technical analysis. Keeps rows where at least close is
+// known; high/low/open/volume may be null on sparse provider responses.
+function parseCandles(result) {
+  var stamps = result && result.timestamp ? result.timestamp : []
+  var block = quoteBlock(result)
+  var opens = block && block.open ? block.open : []
+  var highs = block && block.high ? block.high : []
+  var lows = block && block.low ? block.low : []
+  var closes = block && block.close ? block.close : []
+  var volumes = block && block.volume ? block.volume : []
+  var out = []
+  for (var i = 0; i < stamps.length && i < closes.length; i++) {
+    var t = toNumber(stamps[i])
+    var c = toNumber(closes[i])
+    if (t === null || c === null) continue
+    out.push({
+      t: t,
+      o: toNumber(opens[i]),
+      h: toNumber(highs[i]),
+      l: toNumber(lows[i]),
+      c: c,
+      v: toNumber(volumes[i])
+    })
   }
   return out
 }
@@ -205,6 +308,7 @@ function parseChartResponse(line) {
   quote.open = firstOpen(result)
   quote.volume = toNumber(meta.regularMarketVolume)
   quote.series = parseSeries(result)
+  quote.candles = parseCandles(result)
   return quote
 }
 
@@ -263,6 +367,19 @@ function validCount(quotes) {
   var n = 0
   for (var i = 0; i < list.length; i++) if (isValid(list[i])) n++
   return n
+}
+
+function quoteRowsForSymbols(quotes, symbols, missingError) {
+  var rows = quotes || []
+  var syms = normalizeSymbols(symbols, [])
+  if (!syms.length) return rows
+  var bySymbol = {}
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i] && rows[i].symbol) bySymbol[String(rows[i].symbol).toUpperCase()] = rows[i]
+  }
+  var out = []
+  for (var j = 0; j < syms.length; j++) out.push(bySymbol[syms[j]] || emptyQuote(syms[j], missingError || "No cached data"))
+  return out
 }
 
 function firstValidIndex(quotes) {
@@ -418,6 +535,121 @@ function valueToY(value, bounds, height, padding) {
   return scaleY(v, bounds, height, padding || 0)
 }
 
+// ---- Technical analysis MVP.
+
+function closeValues(series) {
+  var list = series || []
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var c = toNumber(list[i].c)
+    if (c !== null) out.push(c)
+  }
+  return out
+}
+
+function smaValue(values, period) {
+  var list = values || []
+  var p = parseInt(String(period), 10)
+  if (isNaN(p) || p <= 0 || list.length < p) return null
+  var sum = 0
+  for (var i = list.length - p; i < list.length; i++) sum += list[i]
+  return sum / p
+}
+
+function smaSeries(series, period) {
+  var list = series || []
+  var p = parseInt(String(period), 10)
+  if (isNaN(p) || p <= 0) return []
+  var out = []
+  var sum = 0
+  for (var i = 0; i < list.length; i++) {
+    sum += list[i].c
+    if (i >= p) sum -= list[i - p].c
+    if (i >= p - 1) out.push({ t: list[i].t, c: sum / p })
+  }
+  return out
+}
+
+function rsiValue(values, period) {
+  var list = values || []
+  var p = parseInt(String(period), 10) || 14
+  if (list.length <= p) return null
+  var gains = 0
+  var losses = 0
+  for (var i = list.length - p; i < list.length; i++) {
+    var diff = list[i] - list[i - 1]
+    if (diff >= 0) gains += diff
+    else losses += -diff
+  }
+  if (losses === 0) return gains === 0 ? 50 : 100
+  var rs = gains / losses
+  return 100 - (100 / (1 + rs))
+}
+
+function averageVolume(candles, period) {
+  var list = candles || []
+  var p = parseInt(String(period), 10) || 20
+  var sum = 0
+  var count = 0
+  for (var i = Math.max(0, list.length - p); i < list.length; i++) {
+    var v = toNumber(list[i].v)
+    if (v !== null) { sum += v; count++ }
+  }
+  return count ? sum / count : null
+}
+
+function supportResistance(series, lookback) {
+  var list = series || []
+  var n = parseInt(String(lookback), 10) || 30
+  if (list.length < 3) return { support: null, resistance: null }
+  var start = Math.max(0, list.length - n)
+  var support = list[start].c
+  var resistance = list[start].c
+  for (var i = start + 1; i < list.length; i++) {
+    if (list[i].c < support) support = list[i].c
+    if (list[i].c > resistance) resistance = list[i].c
+  }
+  return { support: support, resistance: resistance }
+}
+
+function technicalSummary(quote, series, candles) {
+  var s = series && series.length ? series : (quote && quote.series ? quote.series : [])
+  var c = candles && candles.length ? candles : (quote && quote.candles ? quote.candles : [])
+  if (!s || s.length < 2) return { available: false, lines: ["Not enough chart data for technical analysis yet."], sma20: null, sma50: null, rsi14: null, support: null, resistance: null }
+
+  var values = closeValues(s)
+  var last = values.length ? values[values.length - 1] : null
+  var first = values.length ? values[0] : null
+  var sma20 = smaValue(values, 20)
+  var sma50 = smaValue(values, 50)
+  var rsi14 = rsiValue(values, 14)
+  var sr = supportResistance(s, 30)
+  var avgVol = averageVolume(c, 20)
+  var lastVol = c.length ? toNumber(c[c.length - 1].v) : null
+  var movePct = first ? ((last - first) / first) * 100 : null
+
+  var lines = []
+  var name = quote && quote.symbol ? quote.symbol : "This symbol"
+  if (movePct !== null) {
+    var direction = movePct > 1 ? "uptrend" : (movePct < -1 ? "downtrend" : "sideways range")
+    var article = direction === "uptrend" ? "an" : "a"
+    lines.push(name + " is in " + article + " " + direction + " over the selected chart, moving " + (movePct >= 0 ? "+" : "") + movePct.toFixed(2) + "%.")
+  }
+  if (sma20 !== null) lines.push("Price is " + (last >= sma20 ? "above" : "below") + " SMA20 (" + formatPrice(sma20) + "), suggesting " + (last >= sma20 ? "positive" : "weak") + " short-term momentum.")
+  if (sma50 !== null) lines.push("SMA50 is " + formatPrice(sma50) + "; price is " + (last >= sma50 ? "above" : "below") + " it.")
+  if (rsi14 !== null) {
+    var rsiState = rsi14 >= 70 ? "overbought" : (rsi14 <= 30 ? "oversold" : (rsi14 >= 55 ? "positive" : (rsi14 <= 45 ? "soft" : "neutral")))
+    lines.push("RSI14 is " + rsi14.toFixed(0) + " (" + rsiState + ").")
+  }
+  if (sr.support !== null && sr.resistance !== null) lines.push("Recent support is near " + formatPrice(sr.support) + "; resistance is near " + formatPrice(sr.resistance) + ".")
+  if (avgVol !== null && lastVol !== null) {
+    var volPct = avgVol ? ((lastVol - avgVol) / avgVol) * 100 : 0
+    lines.push("Latest volume is " + Math.abs(volPct).toFixed(0) + "% " + (volPct >= 0 ? "above" : "below") + " its recent average.")
+  }
+
+  return { available: true, lines: lines, sma20: sma20, sma50: sma50, rsi14: rsi14, support: sr.support, resistance: sr.resistance }
+}
+
 // ---- Ticker tape.
 
 function tapeItems(quotes, compact) {
@@ -559,6 +791,22 @@ function convertSeries(series, rate) {
   return out
 }
 
+function convertCandles(candles, rate) {
+  var list = candles || []
+  var r = toNumber(rate)
+  if (r === null || r === 1) return list
+  var out = []
+  for (var i = 0; i < list.length; i++) out.push({
+    t: list[i].t,
+    o: scaled(list[i].o, r),
+    h: scaled(list[i].h, r),
+    l: scaled(list[i].l, r),
+    c: scaled(list[i].c, r),
+    v: list[i].v
+  })
+  return out
+}
+
 function scaled(value, rate) {
   var n = toNumber(value)
   return n === null ? null : n * rate
@@ -588,6 +836,7 @@ function convertQuote(quote, display, rates) {
   out.week52High = scaled(quote.week52High, rate)
   out.open = scaled(quote.open, rate)
   out.series = convertSeries(quote.series, rate)
+  out.candles = convertCandles(quote.candles, rate)
   out.currency = target
   out.converted = true
   return out
@@ -775,20 +1024,64 @@ function parseWatchlist(text) {
   var out = []
   for (var k = 0; k < list.length; k++) {
     if (typeof list[k] !== "string" && typeof list[k] !== "number") continue
-    var symbol = trimString(list[k]).toUpperCase()
+    var symbol = normalizeSymbol(list[k])
     if (symbol === "" || out.indexOf(symbol) !== -1) continue
     out.push(symbol)
   }
   return out
 }
 
-function serializeWatchlist(symbols) {
-  return JSON.stringify({ symbols: symbols || [] }, null, 2) + "\n"
+// A watchlists definition (watchlists.json, an imported file, or the gist)
+// -> { watchlists, activeWatchlist }, or null when it holds no symbols.
+// Accepts { watchlists: [...] }, { symbols: [...] }, a bare array of lists or
+// of symbols, and plain text (one symbol per line, `#` comments), which
+// becomes a single "Main" list.
+function parseWatchlistsDefinition(text) {
+  var parsed = null
+  try { parsed = JSON.parse(String(text || "")) } catch (e) { parsed = null }
+  var lists = []
+  var active = 0
+  var arr = arrayLike(parsed)
+  if (arr) {
+    var named = false
+    for (var i = 0; i < arr.length; i++) if (arr[i] && typeof arr[i] === "object") named = true
+    lists = named ? normalizeWatchlists(arr, []).filter(function(l) { return l.symbols.length }) : []
+    if (!named) {
+      var plain = normalizeSymbols(arr, [])
+      if (plain.length) lists = [{ name: DEFAULT_WATCHLIST_NAME, symbols: plain }]
+    }
+  } else if (parsed && typeof parsed === "object") {
+    if (parsed.watchlists) {
+      var given = listFromValue(parsed.watchlists)
+      if (given.length) lists = normalizeWatchlists(given, [])
+    } else if (parsed.symbols) {
+      var syms = normalizeSymbols(parsed.symbols, [])
+      if (syms.length) lists = [{ name: String(parsed.name || DEFAULT_WATCHLIST_NAME), symbols: syms }]
+    }
+    active = parsed.activeWatchlist
+  } else if (parsed === null) {
+    var fromText = parseWatchlist(text)
+    if (fromText.length) lists = [{ name: DEFAULT_WATCHLIST_NAME, symbols: fromText }]
+  }
+  lists = lists.filter(function(l) { return l.symbols && l.symbols.length })
+  if (!lists.length) return null
+  return { watchlists: lists, activeWatchlist: activeWatchlistIndex(active, lists) }
 }
 
-function gistBody(file, symbols) {
+// Same shape as watchlists.json; the active list is per-machine UI state and
+// stays out of what is synced.
+function serializeWatchlists(watchlists) {
+  return JSON.stringify({ version: 1, watchlists: cloneWatchlists(watchlists) }, null, 2) + "\n"
+}
+
+// Order-sensitive identity of a definition, for change detection.
+function watchlistsKey(watchlists) {
+  return JSON.stringify(cloneWatchlists(watchlists))
+}
+
+function gistBody(file, watchlists) {
   var files = {}
-  files[normalizeGistFile(file)] = { content: serializeWatchlist(symbols) }
+  files[normalizeGistFile(file)] = { content: serializeWatchlists(watchlists) }
   return JSON.stringify({ files: files })
 }
 
@@ -833,13 +1126,13 @@ function gistPullCommand(id, file) {
 
 // The JSON body goes through stdin (`--input -`) so file names and content
 // never need gh's `-f key[sub]=value` escaping.
-function gistPushCommand(id, file, symbols) {
+function gistPushCommand(id, file, watchlists) {
   return ghCommand("printf '%s' \"$2\" | gh api -X PATCH \"gists/$1\" --input - --jq .id",
-    [normalizeGistId(id), gistBody(file, symbols)])
+    [normalizeGistId(id), gistBody(file, watchlists)])
 }
 
-function gistCreateCommand(file, symbols) {
-  var body = JSON.parse(gistBody(file, symbols))
+function gistCreateCommand(file, watchlists) {
+  var body = JSON.parse(gistBody(file, watchlists))
   body.public = false
   body.description = "omarchy-stocks watchlist"
   return ghCommand("printf '%s' \"$1\" | gh api -X POST gists --input - --jq .id", [JSON.stringify(body)])
@@ -903,6 +1196,8 @@ function quoteSummary(quote) {
     if (v === null || v === undefined || v === "") continue
     out[keys[i]] = typeof v === "number" ? Number(v.toFixed(4)) : v
   }
+  var notes = arrayLike(quote.technical)
+  if (notes && notes.length) out.technical = notes.slice()
   return out
 }
 
@@ -998,7 +1293,9 @@ if (typeof module !== "undefined") {
     normalizeGistFile: normalizeGistFile,
     gistUrl: gistUrl,
     parseWatchlist: parseWatchlist,
-    serializeWatchlist: serializeWatchlist,
+    parseWatchlistsDefinition: parseWatchlistsDefinition,
+    serializeWatchlists: serializeWatchlists,
+    watchlistsKey: watchlistsKey,
     gistBody: gistBody,
     ghCommand: ghCommand,
     parseCommandResult: parseCommandResult,
@@ -1019,7 +1316,12 @@ if (typeof module !== "undefined") {
     parseAgentFile: parseAgentFile,
     formatElapsed: formatElapsed,
     DEFAULT_SYMBOLS: DEFAULT_SYMBOLS,
+    ASIA_MARKET_SUFFIXES: ASIA_MARKET_SUFFIXES,
+    normalizeSymbol: normalizeSymbol,
     normalizeSymbols: normalizeSymbols,
+    normalizeWatchlists: normalizeWatchlists,
+    activeWatchlistIndex: activeWatchlistIndex,
+    cloneWatchlists: cloneWatchlists,
     refreshMinutes: refreshMinutes,
     cycleSeconds: cycleSeconds,
     chartUrl: chartUrl,
@@ -1029,10 +1331,12 @@ if (typeof module !== "undefined") {
     emptyQuote: emptyQuote,
     parseChartResponse: parseChartResponse,
     parseQuoteLines: parseQuoteLines,
+    parseCandles: parseCandles,
     isValid: isValid,
     isDown: isDown,
     isUp: isUp,
     validCount: validCount,
+    quoteRowsForSymbols: quoteRowsForSymbols,
     firstValidIndex: firstValidIndex,
     nextIndex: nextIndex,
     shouldRetry: shouldRetry,
@@ -1051,6 +1355,13 @@ if (typeof module !== "undefined") {
     seriesDirection: seriesDirection,
     seriesPoints: seriesPoints,
     valueToY: valueToY,
+    closeValues: closeValues,
+    smaValue: smaValue,
+    smaSeries: smaSeries,
+    rsiValue: rsiValue,
+    averageVolume: averageVolume,
+    supportResistance: supportResistance,
+    technicalSummary: technicalSummary,
     tapeItems: tapeItems,
     normalizeColor: normalizeColor,
     parseThemeColor: parseThemeColor,
@@ -1064,6 +1375,7 @@ if (typeof module !== "undefined") {
     parseRateLines: parseRateLines,
     rateFor: rateFor,
     convertSeries: convertSeries,
+    convertCandles: convertCandles,
     convertQuote: convertQuote,
     convertAll: convertAll
   }

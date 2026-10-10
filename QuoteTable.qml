@@ -3,8 +3,9 @@ import qs.Commons
 import qs.Ui
 import "Model.js" as Model
 
-// Level 1: one dense row per symbol with every number the chart endpoint
-// gives us, sortable by column. Clicking a row opens DetailView (level 2).
+// Level 1: the active watchlist as one dense row per symbol with every
+// number the chart endpoint gives us, sortable by column, plus watchlist
+// switching/editing and the settings box. Clicking a row opens DetailView.
 Column {
   id: table
 
@@ -17,7 +18,7 @@ Column {
     symbol: Style.space(64), name: Style.space(96), price: Style.space(72), change: Style.space(62),
     changePct: Style.space(62), dayPos: Style.space(84), gap: Style.space(54), range: Style.space(50),
     week52Pos: Style.space(72), offHigh: Style.space(58), volume: Style.space(54), spark: Style.space(64),
-    time: Style.space(40), remove: Style.space(14)
+    time: Style.space(40), remove: Style.space(30)
   })
   // Column order, header label, sort key ("" = not sortable), alignment.
   readonly property var columns: [
@@ -42,6 +43,14 @@ Column {
     if (value < 0) return stocks.downColor
     if (value > 0) return stocks.upColor
     return stocks.barForeground
+  }
+
+  // ✎ on a row: load the symbol into the add field, which then replaces it.
+  function editSymbol(symbol) {
+    stocks.beginEditSymbol(symbol)
+    addField.text = symbol
+    addField.forceActiveFocus()
+    addField.selectAll()
   }
 
   function timeLabel(ts) {
@@ -74,7 +83,7 @@ Column {
 
       Text {
         id: title
-        text: "Stocks"
+        text: "Stock HQ"
         color: table.stocks.barForeground
         font.family: table.stocks.fontFamily
         font.pixelSize: Style.font.subtitle
@@ -131,6 +140,170 @@ Column {
         font.family: table.stocks.fontFamily
         font.pixelSize: Style.font.caption
       }
+
+      Chip {
+        stocks: table.stocks
+        text: "⚙"
+        fontSize: Style.font.body
+        selected: table.stocks.settingsOpen
+        onClicked: table.stocks.toggleSettings()
+      }
+
+      Chip {
+        stocks: table.stocks
+        text: "⟳"
+        fontSize: Style.font.body
+        onClicked: table.stocks.refresh()
+      }
+    }
+  }
+
+  // ---- Settings box: refresh interval and the watchlists JSON file.
+  Rectangle {
+    visible: table.stocks.settingsOpen
+    x: Style.space(8)
+    width: parent.width - Style.space(16)
+    height: settingsColumn.implicitHeight + Style.space(16)
+    radius: Style.cornerRadius
+    color: Qt.rgba(table.stocks.barForeground.r, table.stocks.barForeground.g, table.stocks.barForeground.b, 0.06)
+    border.color: Qt.rgba(table.stocks.barForeground.r, table.stocks.barForeground.g, table.stocks.barForeground.b, 0.16)
+    border.width: 1
+
+    Column {
+      id: settingsColumn
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.top: parent.top
+      anchors.margins: Style.space(8)
+      spacing: Style.space(8)
+
+      Row {
+        spacing: Style.space(6)
+
+        Text {
+          anchors.verticalCenter: parent.verticalCenter
+          text: "Refresh every"
+          color: table.stocks.mutedForeground
+          font.family: table.stocks.fontFamily
+          font.pixelSize: Style.font.caption
+        }
+        TextField {
+          id: refreshField
+          width: Style.space(48)
+          text: String(table.stocks.refreshMinutes)
+          foreground: table.stocks.barForeground
+          font.family: table.stocks.fontFamily
+          font.pixelSize: Style.font.caption
+          verticalPadding: Style.space(2)
+          onActiveFocusChanged: table.stocks.editing = activeFocus
+          onAccepted: {
+            table.stocks.saveRefreshMinutes(text)
+            table.stocks.releaseInput()
+          }
+          Keys.onEscapePressed: table.stocks.releaseInput()
+        }
+        Text {
+          anchors.verticalCenter: parent.verticalCenter
+          text: "minutes ⏎"
+          color: table.stocks.mutedForeground
+          font.family: table.stocks.fontFamily
+          font.pixelSize: Style.font.caption
+        }
+
+        Item { width: Style.space(18); height: 1 }
+
+        Text {
+          anchors.verticalCenter: parent.verticalCenter
+          text: "Watchlists JSON"
+          color: table.stocks.mutedForeground
+          font.family: table.stocks.fontFamily
+          font.pixelSize: Style.font.caption
+        }
+        Chip {
+          anchors.verticalCenter: parent.verticalCenter
+          stocks: table.stocks
+          text: "Export"
+          onClicked: table.stocks.requestExportWatchlists()
+        }
+        Chip {
+          anchors.verticalCenter: parent.verticalCenter
+          stocks: table.stocks
+          text: "Import"
+          onClicked: table.stocks.requestImportWatchlists()
+        }
+        Chip {
+          anchors.verticalCenter: parent.verticalCenter
+          stocks: table.stocks
+          text: "Open JSON ↗"
+          onClicked: table.stocks.openWatchlistsFile()
+        }
+      }
+
+      Text {
+        width: parent.width
+        text: table.stocks.fileDialogMessage !== "" ? table.stocks.fileDialogMessage : table.stocks.watchlistsPath
+        elide: Text.ElideMiddle
+        color: table.stocks.mutedForeground
+        font.family: table.stocks.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+    }
+  }
+
+  // ---- Watchlists: switch, add, rename (Enter), delete the active one.
+  Row {
+    x: Style.space(8)
+    spacing: Style.space(4)
+
+    Repeater {
+      model: table.stocks.watchlists
+
+      Chip {
+        required property var modelData
+        required property int index
+        anchors.verticalCenter: parent.verticalCenter
+        stocks: table.stocks
+        text: modelData.name + " " + modelData.symbols.length
+        selected: index === table.stocks.activeWatchlist
+        onClicked: table.stocks.selectWatchlist(index)
+      }
+    }
+
+    Chip {
+      anchors.verticalCenter: parent.verticalCenter
+      stocks: table.stocks
+      text: "+ List"
+      onClicked: table.stocks.addWatchlist()
+    }
+
+    Item { width: Style.space(10); height: 1 }
+
+    TextField {
+      id: listNameField
+      width: Style.space(130)
+      text: table.stocks.activeList.name
+      placeholderText: "List name ⏎"
+      foreground: table.stocks.barForeground
+      font.family: table.stocks.fontFamily
+      font.pixelSize: Style.font.caption
+      verticalPadding: Style.space(2)
+      onActiveFocusChanged: table.stocks.editing = activeFocus
+      onAccepted: {
+        table.stocks.renameActiveWatchlist(text)
+        table.stocks.releaseInput()
+      }
+      Keys.onEscapePressed: {
+        text = table.stocks.activeList.name
+        table.stocks.releaseInput()
+      }
+    }
+
+    Chip {
+      anchors.verticalCenter: parent.verticalCenter
+      visible: table.stocks.watchlists.length > 1
+      stocks: table.stocks
+      text: "Delete list"
+      onClicked: table.stocks.deleteActiveWatchlist()
     }
   }
 
@@ -184,7 +357,7 @@ Column {
         readonly property var q: modelData
         readonly property bool valid: Model.isValid(q)
         readonly property bool cursor: index === table.stocks.cursorIndex
-        readonly property bool hovered: rowMouse.containsMouse || removeMouse.containsMouse
+        readonly property bool hovered: rowMouse.containsMouse || removeMouse.containsMouse || editMouse.containsMouse
 
         width: parent.width
         height: symbolCell.implicitHeight + Style.space(10)
@@ -306,23 +479,42 @@ Column {
             color: table.stocks.mutedForeground
             font.pixelSize: Style.font.caption
           }
-          Text {
+          Row {
             width: table.w.remove
             anchors.verticalCenter: parent.verticalCenter
-            horizontalAlignment: Text.AlignHCenter
-            text: "×"
+            spacing: Style.space(6)
             opacity: row.hovered ? 1 : 0
-            color: removeMouse.containsMouse ? table.stocks.urgentForeground : table.stocks.mutedForeground
-            font.family: table.stocks.fontFamily
-            font.pixelSize: Style.font.body
 
-            MouseArea {
-              id: removeMouse
-              anchors.fill: parent
-              anchors.margins: -Style.space(4)
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: table.stocks.removeSymbol(row.q.symbol)
+            Text {
+              text: "✎"
+              color: editMouse.containsMouse ? table.stocks.barForeground : table.stocks.mutedForeground
+              font.family: table.stocks.fontFamily
+              font.pixelSize: Style.font.body
+
+              MouseArea {
+                id: editMouse
+                anchors.fill: parent
+                anchors.margins: -Style.space(3)
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: table.editSymbol(row.q.symbol)
+              }
+            }
+
+            Text {
+              text: "×"
+              color: removeMouse.containsMouse ? table.stocks.urgentForeground : table.stocks.mutedForeground
+              font.family: table.stocks.fontFamily
+              font.pixelSize: Style.font.body
+
+              MouseArea {
+                id: removeMouse
+                anchors.fill: parent
+                anchors.margins: -Style.space(3)
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: table.stocks.removeSymbol(row.q.symbol)
+              }
             }
           }
         }
@@ -340,7 +532,7 @@ Column {
     font.italic: true
   }
 
-  // ---- Add symbols ("tsm, 2330.TW" works); pushed to the gist when syncing.
+  // ---- Add symbols ("tsm, TW:2330" works) or replace the one being edited.
   Item {
     width: parent.width
     height: addField.implicitHeight
@@ -350,18 +542,21 @@ Column {
       anchors.left: parent.left
       anchors.leftMargin: Style.space(8)
       width: Style.space(260)
-      placeholderText: "Add symbols, e.g. 2330.TW ⏎"
+      placeholderText: table.stocks.editingIndex >= 0
+        ? "Replace " + table.stocks.symbols[table.stocks.editingIndex] + " ⏎"
+        : "Add symbols, e.g. TW:2330 ⏎"
       foreground: table.stocks.barForeground
       font.family: table.stocks.fontFamily
       font.pixelSize: Style.font.bodySmall
       verticalPadding: Style.spacing.controlPaddingY
       onActiveFocusChanged: table.stocks.editing = activeFocus
       onAccepted: {
-        table.stocks.addSymbols(text)
+        table.stocks.submitSymbols(text)
         text = ""
       }
       Keys.onEscapePressed: {
         text = ""
+        table.stocks.editingIndex = -1
         table.stocks.releaseInput()
       }
     }
@@ -372,7 +567,7 @@ Column {
       anchors.right: parent.right
       anchors.rightMargin: Style.space(8)
       anchors.verticalCenter: parent.verticalCenter
-      text: "Click a row (or j/k + Enter) for chart & agent · hover a row and × to remove"
+      text: "Click a row (or j/k + Enter) for chart & agent · hover a row: ✎ edit, × remove"
       elide: Text.ElideRight
       horizontalAlignment: Text.AlignRight
       color: table.stocks.mutedForeground
@@ -449,7 +644,7 @@ Column {
         stocks: table.stocks
         text: syncRow.sync.status === "creating" ? "Creating gist…" : "Create sync gist"
         active: !syncRow.sync.busy
-        onClicked: syncRow.sync.create(table.stocks.symbols)
+        onClicked: syncRow.sync.create(table.stocks.watchlists)
       }
     }
   }
