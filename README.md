@@ -1,4 +1,8 @@
-# Stocks for Omarchy
+# Stock HQ for Omarchy
+
+> Fork of [5d0tal1gat0r/omarchy-stocks](https://github.com/5d0tal1gat0r/omarchy-stocks)
+> that adds a quant-dense quote table, a local AI agent per symbol and a
+> gist-synced watchlist. See [Credits](#credits).
 
 A Wall-Street-style ticker tape for the Omarchy Quattro bar. The tape scrolls
 your symbols (`AAPL 305.59 ▲0.42%  •  NVDA …`) in the theme's green/red; click
@@ -14,13 +18,26 @@ it for a two-level panel:
 The watchlist can sync with a GitHub gist, so you can also edit it on the web.
 Quotes and FX rates come from Yahoo Finance — no API key.
 
-![preview](preview.png)
+**Level 1: every symbol at a glance.** Sort by any column; the bars show where
+the price sits in the day's range (tick = previous close) and in its 52-week range.
+
+![Level 1: quote table](preview-table.png)
+
+**Level 2: one symbol, with the agent's answer.** Chart, full stats, and a
+Quick take written by Claude Code with web search, rendered in the panel.
+
+![Level 2: chart, stats and agent analysis](preview-detail.png)
 
 ## Install
 
 ```sh
-omarchy plugin add https://github.com/5d0tal1gat0r/omarchy-stocks.git --enable
+omarchy plugin add https://github.com/siygle/omarchy-stock-hq.git --enable
 ```
+
+The plugin keeps the original id `io.github.5d0tal1gat0r.stocks`, so it replaces
+the upstream widget rather than sitting next to it, and existing settings carry
+over. Optional requirements: the [`gh`](https://cli.github.com) CLI, signed in,
+for gist sync, and an agent CLI (`claude`, `codex`, `gemini`, …) for analysis.
 
 The widget lands in the bar's center section. Move it with:
 
@@ -143,6 +160,16 @@ wrap the `gh` and agent processes.
 omarchy plugin remove io.github.5d0tal1gat0r.stocks
 ```
 
+## Credits
+
+Built on [omarchy-stocks](https://github.com/5d0tal1gat0r/omarchy-stocks) by
+[@5d0tal1gat0r](https://github.com/5d0tal1gat0r). This fork reuses its whole
+foundation: the ticker tape, the Yahoo Finance fetching and parsing, currency
+conversion, chart geometry, theming and the test suite. Thank you! This fork
+adds the level-1 quote table, the level-2 view with the local agent runner,
+and gist sync.
+
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE); the original copyright notice of
+omarchy-stocks is kept.
