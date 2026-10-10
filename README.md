@@ -98,7 +98,12 @@ omarchy bar set io.github.siygle.stock-hq agentCommand '["codex","exec","{prompt
 omarchy bar set io.github.siygle.stock-hq agentPrompts '[{"name":"繁中快評","prompt":"用繁體中文分析 {name} ({symbol})，最新報價：{quote}"}]' --json
 ```
 
-Prompts (presets and the custom field) can use `{symbol} {name} {exchange}
+Every prompt is sent with the symbol on screen as context: a line naming it
+and its latest quote as JSON is prepended, so a bare custom prompt like
+`這支股票近期的風險？` works. Prompts that already use `{quote}` (such as the
+Quick take preset) carry the data themselves and are sent as written.
+
+Prompts (presets and the custom field) can also use `{symbol} {name} {exchange}
 {currency} {price} {change} {changePct} {dayLow} {dayHigh} {week52Low}
 {week52High} {volume}` and `{quote}` (all quote fields as JSON).
 

@@ -855,9 +855,21 @@ var DEFAULT_AGENT_PROMPTS = [
   { name: "News & catalysts", prompt: "Search the news from the last two weeks about {name} ({symbol}) and list upcoming catalysts (earnings date, product events, macro). Markdown bullets with dates and sources." }
 ]
 
+// Settings can reach QML as array-like QVariantLists, not real JS arrays
+// (the same reason normalizeSymbols accepts anything with a length).
+function arrayLike(value) {
+  if (Array.isArray(value)) return value
+  var out = []
+  if (value && typeof value === "object" && typeof value.length === "number") {
+    for (var i = 0; i < value.length; i++) out.push(value[i])
+    return out
+  }
+  return null
+}
+
 function normalizeAgentCommand(value) {
   var list = []
-  if (Array.isArray(value)) list = value
+  if (arrayLike(value)) list = arrayLike(value)
   else if (typeof value === "string") list = trimString(value).split(/\s+/)
   var out = []
   for (var i = 0; i < list.length; i++) {
@@ -868,7 +880,7 @@ function normalizeAgentCommand(value) {
 }
 
 function normalizeAgentPrompts(value) {
-  var list = Array.isArray(value) ? value : []
+  var list = arrayLike(value) || []
   var out = []
   for (var i = 0; i < list.length; i++) {
     var p = list[i]
@@ -909,6 +921,18 @@ function fillPrompt(template, quote) {
     if (typeof v === "number") return formatPrice(v)
     return String(v)
   })
+}
+
+// What the agent actually receives: the filled template, prefixed with the
+// symbol on screen and its latest quote so a bare custom prompt ("is this a
+// good entry?") still knows what "this" is. Templates that already embed
+// {quote} carry the data themselves and are sent as-is.
+function agentPrompt(template, quote) {
+  var filled = fillPrompt(template, quote)
+  if (!quote || String(template || "").indexOf("{quote}") !== -1) return filled
+  var label = String(quote.symbol || "") + (quote.name ? " (" + quote.name + (quote.exchange ? ", " + quote.exchange : "") + ")" : "")
+  return "Context: the user is looking at " + label + " in their stock watchlist; \"this stock\" refers to it. " +
+    "Latest quote: " + JSON.stringify(quoteSummary(quote)) + "\n\n" + filled
 }
 
 // Command template -> argv with `{prompt}` substituted (appended when absent).
@@ -988,6 +1012,7 @@ if (typeof module !== "undefined") {
     normalizeAgentPrompts: normalizeAgentPrompts,
     quoteSummary: quoteSummary,
     fillPrompt: fillPrompt,
+    agentPrompt: agentPrompt,
     agentArgv: agentArgv,
     agentFileName: agentFileName,
     agentFileText: agentFileText,

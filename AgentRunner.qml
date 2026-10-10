@@ -49,7 +49,7 @@ Item {
   function run(quote, promptName, template) {
     if (!quote || agentProc.running) return false
     var symbol = quote.symbol
-    var prompt = Model.fillPrompt(template, quote)
+    var prompt = Model.agentPrompt(template, quote)
     runningSymbol = symbol
     cancelRequested = false
     now = Date.now()

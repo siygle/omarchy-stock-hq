@@ -583,3 +583,19 @@ test("agentFileText / parseAgentFile round-trip; plain files pass through", () =
   assert.deepEqual(Model.parseAgentFile(text), { prompt: "Quick take", at: 1700000000000, output: "# Hi\n\nbody" })
   assert.deepEqual(Model.parseAgentFile("just text"), { prompt: "", at: null, output: "just text" })
 })
+
+test("agentPrompt prefixes the current symbol and quote unless {quote} is already used", () => {
+  const q = fullQuote()
+  const custom = Model.agentPrompt("Is this a good entry?", q)
+  assert.ok(custom.startsWith("Context: the user is looking at AAPL (Apple Inc., NasdaqGS)"))
+  assert.ok(custom.endsWith("\n\nIs this a good entry?"))
+  assert.equal(JSON.parse(custom.match(/Latest quote: (\{.*\})\n/)[1]).price, 105)
+  assert.equal(Model.agentPrompt("Data: {quote}", q), Model.fillPrompt("Data: {quote}", q))
+  assert.equal(Model.agentPrompt("hi", null), "hi")
+})
+
+test("agent settings accept array-like values (QVariantList in QML)", () => {
+  const like = arr => Object.assign({ length: arr.length }, arr)
+  assert.deepEqual(Model.normalizeAgentCommand(like(["printf", "%s", "{prompt}"])), ["printf", "%s", "{prompt}"])
+  assert.deepEqual(Model.normalizeAgentPrompts(like([{ name: "R", prompt: "p" }])), [{ name: "R", prompt: "p" }])
+})
