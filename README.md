@@ -34,15 +34,17 @@ Quick take written by Claude Code with web search, rendered in the panel.
 omarchy plugin add https://github.com/siygle/omarchy-stock-hq.git --enable
 ```
 
-The plugin keeps the original id `io.github.5d0tal1gat0r.stocks`, so it replaces
-the upstream widget rather than sitting next to it, and existing settings carry
-over. Optional requirements: the [`gh`](https://cli.github.com) CLI, signed in,
-for gist sync, and an agent CLI (`claude`, `codex`, `gemini`, …) for analysis.
+The plugin id is `io.github.siygle.stock-hq`, so it installs next to the
+upstream `io.github.5d0tal1gat0r.stocks` widget instead of replacing it. If you
+are switching over, copy your settings (`symbols`, `currency`, …) across with
+`omarchy bar set` and remove the upstream plugin. Optional requirements: the
+[`gh`](https://cli.github.com) CLI, signed in, for gist sync, and an agent CLI
+(`claude`, `codex`, `gemini`, …) for analysis.
 
 The widget lands in the bar's center section. Move it with:
 
 ```sh
-omarchy bar move io.github.5d0tal1gat0r.stocks --section right
+omarchy bar move io.github.siygle.stock-hq --section right
 ```
 
 ## Usage
@@ -62,7 +64,7 @@ omarchy bar move io.github.5d0tal1gat0r.stocks --section right
 | detail | agent preset chips / custom prompt field | run the agent on this symbol, see [Agent](#agent) |
 | detail | `Open on Yahoo Finance ↗` | open the symbol in your browser |
 
-IPC (for keybindings): `omarchy-shell io.github.5d0tal1gat0r.stocks toggle|open|close|refresh|pause|sync`,
+IPC (for keybindings): `omarchy-shell io.github.siygle.stock-hq toggle|open|close|refresh|pause|sync`,
 `… detail <SYMBOL>` (open level 2) and `… analyze <SYMBOL>` (open level 2 and run the first agent preset).
 
 ## Gist sync
@@ -72,7 +74,7 @@ Click `Create sync gist` in the panel footer: a secret gist holding
 `gistId`. Or point at an existing gist:
 
 ```sh
-omarchy bar set io.github.5d0tal1gat0r.stocks gistId https://gist.github.com/<you>/<id>
+omarchy bar set io.github.siygle.stock-hq gistId https://gist.github.com/<you>/<id>
 ```
 
 Every refresh pulls the gist; an edit made on gist.github.com replaces the
@@ -91,9 +93,9 @@ per symbol in `~/.cache/omarchy-stocks/agent/<SYMBOL>.md`. One run at a time;
 
 ```sh
 # the default; any CLI that takes a prompt argument and prints the answer works
-omarchy bar set io.github.5d0tal1gat0r.stocks agentCommand '["claude","-p","--allowedTools=WebSearch,WebFetch","{prompt}"]' --json
-omarchy bar set io.github.5d0tal1gat0r.stocks agentCommand '["codex","exec","{prompt}"]' --json
-omarchy bar set io.github.5d0tal1gat0r.stocks agentPrompts '[{"name":"繁中快評","prompt":"用繁體中文分析 {name} ({symbol})，最新報價：{quote}"}]' --json
+omarchy bar set io.github.siygle.stock-hq agentCommand '["claude","-p","--allowedTools=WebSearch,WebFetch","{prompt}"]' --json
+omarchy bar set io.github.siygle.stock-hq agentCommand '["codex","exec","{prompt}"]' --json
+omarchy bar set io.github.siygle.stock-hq agentPrompts '[{"name":"繁中快評","prompt":"用繁體中文分析 {name} ({symbol})，最新報價：{quote}"}]' --json
 ```
 
 Prompts (presets and the custom field) can use `{symbol} {name} {exchange}
@@ -106,11 +108,11 @@ Settings live on the widget's entry in `~/.config/omarchy/shell.json` and apply
 instantly:
 
 ```sh
-omarchy bar set io.github.5d0tal1gat0r.stocks symbols '["AAPL","MSFT","BTC-USD","^GSPC"]' --json
-omarchy bar set io.github.5d0tal1gat0r.stocks tickerWidth 260
-omarchy bar set io.github.5d0tal1gat0r.stocks scrollSpeed 30
-omarchy bar set io.github.5d0tal1gat0r.stocks currency EUR
-omarchy bar set io.github.5d0tal1gat0r.stocks compact true --json    # "AAPL ▲0.42%" without the price
+omarchy bar set io.github.siygle.stock-hq symbols '["AAPL","MSFT","BTC-USD","^GSPC"]' --json
+omarchy bar set io.github.siygle.stock-hq tickerWidth 260
+omarchy bar set io.github.siygle.stock-hq scrollSpeed 30
+omarchy bar set io.github.siygle.stock-hq currency EUR
+omarchy bar set io.github.siygle.stock-hq compact true --json    # "AAPL ▲0.42%" without the price
 ```
 
 | key | default | meaning |
@@ -143,7 +145,7 @@ node --test test/model.test.js                              # Model.js unit test
 /usr/lib/qt6/bin/qmllint -I /usr/share/omarchy/shell *.qml
 omarchy plugin validate "$PWD"
 omarchy plugin add "$PWD" --enable                          # installs a clone into ~/.config/omarchy/plugins/
-rsync -a --delete --exclude .git ./ ~/.config/omarchy/plugins/io.github.5d0tal1gat0r.stocks/
+rsync -a --delete --exclude .git ./ ~/.config/omarchy/plugins/io.github.siygle.stock-hq/
 omarchy restart shell                                       # QML is cached per shell process; a restart loads the edit
 qs log -p /usr/share/omarchy/shell --tail 100               # shell log
 ```
@@ -157,7 +159,7 @@ wrap the `gh` and agent processes.
 ## Remove
 
 ```sh
-omarchy plugin remove io.github.5d0tal1gat0r.stocks
+omarchy plugin remove io.github.siygle.stock-hq
 ```
 
 ## Credits

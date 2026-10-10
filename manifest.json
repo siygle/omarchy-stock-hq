@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "io.github.5d0tal1gat0r.stocks",
-  "name": "Stocks",
+  "id": "io.github.siygle.stock-hq",
+  "name": "Stock HQ",
   "version": "0.2.0",
-  "author": "5d0tal1gat0r",
+  "author": "siygle",
   "license": "MIT",
   "description": "Stock ticker tape with a dense quotes table, per-symbol charts, local AI agent analysis and gist-synced watchlist (Yahoo Finance, no API key).",
   "kinds": ["bar-widget"],
@@ -11,7 +11,7 @@
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "Stocks",
+    "displayName": "Stock HQ",
     "description": "Cycling stock ticker with a quotes panel",
     "category": "Info",
     "allowMultiple": false,

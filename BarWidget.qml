@@ -7,11 +7,11 @@ import "Model.js" as Model
 // Bar entry for the Stocks widget: a fixed-width ticker tape that scrolls the
 // panel's quotes right-to-left. Panel plumbing follows omarchy.weather /
 // omarchy.clock so `omarchy-shell shell summon|hide|toggle
-// io.github.5d0tal1gat0r.stocks` route here through the bar's open/close/opened
+// io.github.siygle.stock-hq` route here through the bar's open/close/opened
 // contract.
 BarWidget {
   id: root
-  moduleName: "io.github.5d0tal1gat0r.stocks"
+  moduleName: "io.github.siygle.stock-hq"
 
   // ---- Settings (inline on this widget's shell.json entry).
   readonly property int tickerWidth: Model.tickerWidth(setting("tickerWidth", 180))
@@ -99,7 +99,7 @@ BarWidget {
   }
 
   IpcHandler {
-    target: "io.github.5d0tal1gat0r.stocks"
+    target: "io.github.siygle.stock-hq"
 
     function refresh(): void { root.broadcast("refresh") }
     function pause(): void { root.broadcast("togglePause") }
