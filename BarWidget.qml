@@ -36,6 +36,17 @@ BarWidget {
     if (panelLoader.item && panelLoader.item.toggle) panelLoader.item.toggle()
   }
 
+  // Opens the panel on one symbol's level-2 view, optionally running the
+  // first agent preset on it.
+  function openDetail(symbol, analyze) {
+    var target = panelLoader.item
+    if (!target || !target.showDetail) return
+    if (!target.opened) target.open()
+    target.showDetail(String(symbol).toUpperCase())
+    if (analyze && target.agentPrompts.length)
+      target.runAgent(target.agentPrompts[0].name, target.agentPrompts[0].prompt)
+  }
+
   function togglePause() {
     pausedByUser = !pausedByUser
   }
@@ -97,6 +108,9 @@ BarWidget {
     function show(): void { root.open() }
     function hide(): void { root.close() }
     function toggle(): void { root.togglePanel() }
+    function detail(symbol: string): void { root.openDetail(symbol, false) }
+    function analyze(symbol: string): void { root.openDetail(symbol, true) }
+    function sync(): void { if (panelLoader.item && panelLoader.item.syncNow) panelLoader.item.syncNow() }
   }
 
   // One pass over every item: colored quote text, neutral separator.

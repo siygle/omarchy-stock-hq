@@ -488,3 +488,197 @@ test("convertQuote: scales money fields and series, keeps percentages, tags the 
   assert.deepEqual(Model.convertSeries([{ t: 1, c: 2 }], null), [{ t: 1, c: 2 }])
   assert.equal(Model.convertAll([q], "EUR", { "USDEUR=X": 0.5 })[0].price, 152.795)
 })
+
+// ---- Level-1 metrics
+
+const fullQuote = () => Object.assign(Model.emptyQuote("AAPL"), {
+  name: "Apple Inc.", exchange: "NasdaqGS", currency: "USD",
+  price: 105, prevClose: 100, change: 5, changePct: 5, open: 102,
+  dayLow: 99, dayHigh: 109, week52Low: 80, week52High: 140, volume: 1234567, marketTime: 1700000000
+})
+
+test("rangePosition: clamps, handles flat and unknown ranges", () => {
+  assert.equal(Model.rangePosition(5, 0, 10), 0.5)
+  assert.equal(Model.rangePosition(-1, 0, 10), 0)
+  assert.equal(Model.rangePosition(11, 0, 10), 1)
+  assert.equal(Model.rangePosition(3, 3, 3), 0.5)
+  assert.equal(Model.rangePosition(null, 0, 10), null)
+  assert.equal(Model.rangePosition(5, 10, 0), null)
+})
+
+test("gap / day range / off-high percentages", () => {
+  const q = fullQuote()
+  assert.equal(Model.gapPct(q), 2)
+  assert.equal(Model.dayRangePct(q), 10)
+  assert.equal(Model.offHighPct(q), -25)
+  assert.equal(Model.gapPct(Object.assign(q, { open: null })), null)
+  assert.equal(Model.dayRangePct(Object.assign(fullQuote(), { prevClose: 0 })), null)
+  assert.equal(Model.offHighPct(null), null)
+})
+
+test("formatSignedPct / formatSignedNumber", () => {
+  assert.equal(Model.formatSignedPct(1.234), "+1.23%")
+  assert.equal(Model.formatSignedPct(-0.4), "-0.40%")
+  assert.equal(Model.formatSignedPct(null), "")
+  assert.equal(Model.formatSignedNumber(-1.5, 100), "-1.50")
+  assert.equal(Model.formatSignedNumber(0.01, 0.5), "+0.0100")
+})
+
+test("marketSummary counts advancers/decliners and averages valid quotes", () => {
+  const up = fullQuote()
+  const down = Object.assign(fullQuote(), { symbol: "B", change: -1, changePct: -3 })
+  const bad = Model.emptyQuote("X", "Not Found")
+  const s = Model.marketSummary([up, down, bad])
+  assert.equal(s.up, 1)
+  assert.equal(s.down, 1)
+  assert.equal(s.flat, 0)
+  assert.equal(s.avgPct, 1)
+  assert.equal(Model.marketSummary([]).avgPct, null)
+})
+
+test("sortQuotes: by metric, desc/asc, invalid last, empty key keeps order", () => {
+  const a = Object.assign(fullQuote(), { symbol: "A", changePct: 1 })
+  const b = Object.assign(fullQuote(), { symbol: "B", changePct: 3 })
+  const c = Object.assign(fullQuote(), { symbol: "C", changePct: -2 })
+  const bad = Model.emptyQuote("Z", "Not Found")
+  const syms = list => list.map(q => q.symbol)
+  assert.deepEqual(syms(Model.sortQuotes([a, bad, b, c], "changePct", true)), ["B", "A", "C", "Z"])
+  assert.deepEqual(syms(Model.sortQuotes([a, bad, b, c], "changePct", false)), ["C", "A", "B", "Z"])
+  assert.deepEqual(syms(Model.sortQuotes([c, a, b], "symbol", false)), ["A", "B", "C"])
+  assert.deepEqual(syms(Model.sortQuotes([c, a, b], "", true)), ["C", "A", "B"])
+  assert.deepEqual(syms(Model.sortQuotes([c, a, b], "bogus", true)), ["C", "A", "B"])
+})
+
+// ---- Gist sync
+
+test("parseWatchlist: JSON array, JSON object, and plain text with comments", () => {
+  assert.deepEqual(Model.parseWatchlist('["aapl"," nvda","AAPL"]'), ["AAPL", "NVDA"])
+  assert.deepEqual(Model.parseWatchlist('{"symbols":["2330.tw","^gspc"]}'), ["2330.TW", "^GSPC"])
+  assert.deepEqual(Model.parseWatchlist("AAPL  # core\nnvda, msft\n# tsla\n\nBTC-USD"), ["AAPL", "NVDA", "MSFT", "BTC-USD"])
+  assert.deepEqual(Model.parseWatchlist(""), [])
+  assert.deepEqual(Model.parseWatchlist("null"), [])
+  assert.deepEqual(Model.parseWatchlist('{"other":1}'), [])
+})
+
+test("parseWatchlist maps Asia shortcuts", () => {
+  assert.deepEqual(Model.parseWatchlist("TW:2330, hk:0700"), ["2330.TW", "0700.HK"])
+})
+
+test("parseWatchlistsDefinition: watchlists.json, symbols object, arrays, plain text", () => {
+  const def = Model.parseWatchlistsDefinition(JSON.stringify({ version: 1, activeWatchlist: 1, watchlists: [
+    { name: "US", symbols: ["aapl"] }, { name: "TW", symbols: ["TW:2330"] }] }))
+  assert.deepEqual(def, { watchlists: [{ name: "US", symbols: ["AAPL"] }, { name: "TW", symbols: ["2330.TW"] }], activeWatchlist: 1 })
+  assert.deepEqual(Model.parseWatchlistsDefinition('{"symbols":["msft"]}').watchlists, [{ name: "Main", symbols: ["MSFT"] }])
+  assert.deepEqual(Model.parseWatchlistsDefinition('["nvda","tw2330"]').watchlists, [{ name: "Main", symbols: ["NVDA", "2330.TW"] }])
+  assert.deepEqual(Model.parseWatchlistsDefinition('[{"name":"X","symbols":["A"]},{"name":"Empty","symbols":[]}]').watchlists, [{ name: "X", symbols: ["A"] }])
+  assert.deepEqual(Model.parseWatchlistsDefinition("# web edit\nAAPL\nTW:2330").watchlists, [{ name: "Main", symbols: ["AAPL", "2330.TW"] }])
+  assert.equal(Model.parseWatchlistsDefinition(""), null)
+  assert.equal(Model.parseWatchlistsDefinition("null"), null)
+  assert.equal(Model.parseWatchlistsDefinition('{"watchlists":[]}'), null)
+  assert.equal(Model.parseWatchlistsDefinition('{"other":1}'), null)
+})
+
+test("serializeWatchlists round-trips; watchlistsKey tracks content and order", () => {
+  const lists = [{ name: "US", symbols: ["AAPL"] }, { name: "TW", symbols: ["2330.TW", "0050.TW"] }]
+  const text = Model.serializeWatchlists(lists)
+  assert.equal(JSON.parse(text).activeWatchlist, undefined)
+  assert.deepEqual(Model.parseWatchlistsDefinition(text).watchlists, lists)
+  assert.equal(Model.watchlistsKey(lists), Model.watchlistsKey(Model.cloneWatchlists(lists)))
+  assert.notEqual(Model.watchlistsKey(lists), Model.watchlistsKey([lists[1], lists[0]]))
+})
+
+test("normalizeGistId accepts ids and URLs; normalizeGistFile defaults", () => {
+  const id = "0123456789abcdef0123456789abcdef"
+  assert.equal(Model.normalizeGistId(id), id)
+  assert.equal(Model.normalizeGistId("https://gist.github.com/someone/" + id + "/"), id)
+  assert.equal(Model.normalizeGistId("nope"), "")
+  assert.equal(Model.normalizeGistFile(""), "stocks.json")
+  assert.equal(Model.normalizeGistFile("a/b"), "stocks.json")
+  assert.equal(Model.normalizeGistFile("list.txt"), "list.txt")
+})
+
+test("gist commands run through the sh wrapper with positional args", () => {
+  const id = "0123456789abcdef0123456789abcdef"
+  const pull = Model.gistPullCommand(id, "stocks.json")
+  assert.equal(pull[0], "sh")
+  assert.deepEqual(pull.slice(3), ["sh", id, '.files["stocks.json"].content'])
+  const lists = [{ name: "Main", symbols: ["AAPL"] }]
+  const push = Model.gistPushCommand(id, "stocks.json", lists)
+  assert.equal(push[4], id)
+  assert.deepEqual(JSON.parse(push[5]), { files: { "stocks.json": { content: Model.serializeWatchlists(lists) } } })
+  const create = JSON.parse(Model.gistCreateCommand("stocks.json", lists)[4])
+  assert.equal(create.public, false)
+  assert.ok(create.files["stocks.json"].content.includes("AAPL"))
+})
+
+test("ghCommand wrapper reports exit code and merged output (real sh)", () => {
+  const { execFileSync } = require("node:child_process")
+  const run = cmd => Model.parseCommandResult(execFileSync(cmd[0], cmd.slice(1)).toString())
+  assert.deepEqual(run(Model.ghCommand('printf "%s" "$1"', ["it's \"quoted\" $HOME"])), { code: 0, output: "it's \"quoted\" $HOME" })
+  const failed = run(Model.ghCommand('echo "gh: Not Found (HTTP 404)" >&2; exit 1', []))
+  assert.equal(failed.code, 1)
+  assert.equal(Model.commandError(failed), "Not Found (HTTP 404)")
+  assert.equal(Model.commandError({ code: 127, output: "" }), "gh CLI not found")
+  assert.equal(Model.commandError({ code: 1, output: '{"message":"Not Found","status":"404"}gh: Not Found (HTTP 404)' }), "Not Found (HTTP 404)")
+  assert.equal(Model.commandError({ code: 1, output: '{"message":"Bad credentials"}' }), "Bad credentials")
+  assert.equal(Model.parseCommandResult("garbage").code, -1)
+})
+
+// ---- Agent
+
+test("normalizeAgentCommand / normalizeAgentPrompts fall back to defaults", () => {
+  assert.deepEqual(Model.normalizeAgentCommand(null), Model.DEFAULT_AGENT_COMMAND)
+  assert.deepEqual(Model.normalizeAgentCommand("codex exec {prompt}"), ["codex", "exec", "{prompt}"])
+  assert.deepEqual(Model.normalizeAgentPrompts([{ name: "x" }, 3]), Model.DEFAULT_AGENT_PROMPTS)
+  assert.deepEqual(Model.normalizeAgentPrompts([{ name: " A ", prompt: " p " }]), [{ name: "A", prompt: "p" }])
+})
+
+test("fillPrompt substitutes quote fields, {quote} JSON, and keeps unknown placeholders", () => {
+  const q = fullQuote()
+  assert.equal(Model.fillPrompt("{symbol} {name} {price} {changePct} {volume} {nope}", q),
+    "AAPL Apple Inc. 105.00 +5.00% 1.2M {nope}")
+  const json = JSON.parse(Model.fillPrompt("{quote}", q))
+  assert.equal(json.symbol, "AAPL")
+  assert.equal(json.series, undefined)
+})
+
+test("agentArgv substitutes {prompt} or appends it", () => {
+  assert.deepEqual(Model.agentArgv(["claude", "-p", "{prompt}"], "hi there"), ["claude", "-p", "hi there"])
+  assert.deepEqual(Model.agentArgv(["gemini", "-p"], "x"), ["gemini", "-p", "x"])
+  assert.deepEqual(Model.agentArgv(["tool", "--q={prompt}"], "x"), ["tool", "--q=x"])
+})
+
+test("agentFileName / formatElapsed", () => {
+  assert.equal(Model.agentFileName("^GSPC"), "_GSPC.md")
+  assert.equal(Model.agentFileName("EURUSD=X"), "EURUSD=X.md")
+  assert.equal(Model.formatElapsed(83), "1:23")
+  assert.equal(Model.formatElapsed(null), "0:00")
+})
+
+test("agentFileText / parseAgentFile round-trip; plain files pass through", () => {
+  const text = Model.agentFileText({ prompt: "Quick take", at: 1700000000000 }, "# Hi\n\nbody")
+  assert.deepEqual(Model.parseAgentFile(text), { prompt: "Quick take", at: 1700000000000, output: "# Hi\n\nbody" })
+  assert.deepEqual(Model.parseAgentFile("just text"), { prompt: "", at: null, output: "just text" })
+})
+
+test("agentPrompt prefixes the current symbol and quote unless {quote} is already used", () => {
+  const q = fullQuote()
+  const custom = Model.agentPrompt("Is this a good entry?", q)
+  assert.ok(custom.startsWith("Context: the user is looking at AAPL (Apple Inc., NasdaqGS)"))
+  assert.ok(custom.endsWith("\n\nIs this a good entry?"))
+  assert.equal(JSON.parse(custom.match(/Latest quote: (\{.*\})\n/)[1]).price, 105)
+  assert.equal(Model.agentPrompt("Data: {quote}", q), Model.fillPrompt("Data: {quote}", q))
+  assert.equal(Model.agentPrompt("hi", null), "hi")
+})
+
+test("agent settings accept array-like values (QVariantList in QML)", () => {
+  const like = arr => Object.assign({ length: arr.length }, arr)
+  assert.deepEqual(Model.normalizeAgentCommand(like(["printf", "%s", "{prompt}"])), ["printf", "%s", "{prompt}"])
+  assert.deepEqual(Model.normalizeAgentPrompts(like([{ name: "R", prompt: "p" }])), [{ name: "R", prompt: "p" }])
+})
+
+test("quoteSummary carries technical notes when present", () => {
+  const q = Object.assign(fullQuote(), { technical: ["AAPL is in an uptrend."] })
+  assert.deepEqual(Model.quoteSummary(q).technical, ["AAPL is in an uptrend."])
+  assert.equal(Model.quoteSummary(fullQuote()).technical, undefined)
+})

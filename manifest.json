@@ -2,17 +2,17 @@
   "schemaVersion": 1,
   "id": "io.github.siygle.stock-hq",
   "name": "Stock HQ",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "siygle",
   "license": "MIT",
-  "description": "Stock HQ ticker tape with a quotes panel for the Omarchy bar (Yahoo Finance, no API key).",
+  "description": "Stock ticker tape with a dense quotes table, per-symbol charts, local AI agent analysis and gist-synced watchlist (Yahoo Finance, no API key).",
   "kinds": ["bar-widget"],
   "entryPoints": {
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
     "displayName": "Stock HQ",
-    "description": "Cycling Stock HQ ticker with a quotes panel",
+    "description": "Cycling stock ticker with a quotes panel",
     "category": "Info",
     "allowMultiple": false,
     "defaultSection": "center"
