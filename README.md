@@ -64,8 +64,8 @@ omarchy bar move io.github.siygle.stock-hq --section right
 | tape | middle click | refresh now |
 | tape | right click / hover | pause the tape (hover pauses while pointing) |
 | table | click a row / `j` `k` + Enter | open that symbol (level 2); Esc or `h` goes back |
-| table | `Sort` chips: `Chg% ↓` `Chg% ↑` `Chg ↓` `Chg ↑` `List order` | one-click sort by daily move (percent or amount), or back to the list's own order (persisted) |
-| table | click a column header | sort by any column: descending → ascending → watchlist order (persisted) |
+| table | click a column header (e.g. `Chg%`, `Chg`) | sort by it: descending ↓ → ascending ↑ → watchlist order; the sorted header is highlighted (persisted) |
+| table | right-click a column header | back to the watchlist's own order |
 | table | watchlist chips / `+ List` | switch lists or create another one |
 | table | list name field (Enter) / `Delete list` | rename or remove the active watchlist |
 | table | `Add symbols` field | add one or more symbols (`tsm, TW:2330`) |

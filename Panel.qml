@@ -228,7 +228,7 @@ Panel {
       root.bar.shell.updateEntryInline(root.moduleName, entry)
   }
 
-  // Quick-sort chips: set key and direction at once ("" = watchlist order).
+  // Set key and direction at once ("" = watchlist order; header right-click).
   function setSort(key, desc) {
     var k = Model.normalizeSortKey(key)
     if (k === sortKey && (k === "" || desc === sortDesc)) return

@@ -432,43 +432,10 @@ Column {
 
   PanelSeparator { foreground: table.stocks.barForeground }
 
-  // ---- Quick sort by daily move (the column headers sort too). The chip
-  //      matching the current sort is highlighted.
-  Row {
-    x: Style.space(8)
-    spacing: Style.space(4)
-
-    readonly property var presets: [
-      { label: "Chg% ↓", key: "changePct", desc: true },
-      { label: "Chg% ↑", key: "changePct", desc: false },
-      { label: "Chg ↓", key: "change", desc: true },
-      { label: "Chg ↑", key: "change", desc: false },
-      { label: "List order", key: "", desc: true }
-    ]
-
-    Text {
-      anchors.verticalCenter: parent.verticalCenter
-      rightPadding: Style.space(4)
-      text: "Sort"
-      color: table.stocks.mutedForeground
-      font.family: table.stocks.fontFamily
-      font.pixelSize: Style.font.caption
-    }
-
-    Repeater {
-      model: parent.presets
-
-      Chip {
-        required property var modelData
-        stocks: table.stocks
-        text: modelData.label
-        selected: modelData.key === table.stocks.sortKey && (modelData.key === "" || modelData.desc === table.stocks.sortDesc)
-        onClicked: table.stocks.setSort(modelData.key, modelData.desc)
-      }
-    }
-  }
-
-  // ---- Column headers; sortable ones cycle desc -> asc -> watchlist order.
+  // ---- Column headers double as the sort controls: click cycles
+  //      descending -> ascending -> watchlist order, right-click resets.
+  //      The sorted column is filled like a selected chip; hovering a
+  //      sortable one shows ↕.
   Row {
     x: Style.space(8)
     spacing: table.gap
@@ -476,30 +443,54 @@ Column {
     Repeater {
       model: table.columns
 
-      Text {
+      Rectangle {
         id: header
         required property var modelData
-        readonly property bool sorted: modelData.sort !== "" && modelData.sort === table.stocks.sortKey
+        readonly property bool sortable: modelData.sort !== ""
+        readonly property bool sorted: sortable && modelData.sort === table.stocks.sortKey
+        readonly property string arrow: header.sorted
+          ? (table.stocks.sortDesc ? "↓" : "↑")
+          : (header.sortable && headerMouse.containsMouse ? "↕" : "")
+
         width: table.w[modelData.id]
-        horizontalAlignment: modelData.center ? Text.AlignHCenter : (modelData.right ? Text.AlignRight : Text.AlignLeft)
-        text: modelData.label + (header.sorted ? (table.stocks.sortDesc ? " ↓" : " ↑") : "")
-        elide: Text.ElideRight
-        color: header.sorted || headerMouse.containsMouse ? table.stocks.barForeground : table.stocks.mutedForeground
-        font.family: table.stocks.fontFamily
-        font.pixelSize: Style.font.caption
-        font.bold: header.sorted
+        height: headerText.implicitHeight + Style.space(6)
+        radius: Style.cornerRadius
+        color: header.sorted
+          ? Style.selectedFillFor(table.stocks.barForeground, Color.accent)
+          : (header.sortable && headerMouse.containsMouse ? Style.hoverFillFor(table.stocks.barForeground, Color.accent) : "transparent")
+
+        Text {
+          id: headerText
+          anchors.fill: parent
+          anchors.leftMargin: Style.space(2)
+          anchors.rightMargin: Style.space(2)
+          verticalAlignment: Text.AlignVCenter
+          horizontalAlignment: header.modelData.center ? Text.AlignHCenter : (header.modelData.right ? Text.AlignRight : Text.AlignLeft)
+          // Arrow on the inner side so right-aligned labels keep their edge.
+          text: header.arrow === "" ? header.modelData.label
+            : (header.modelData.right ? header.arrow + header.modelData.label : header.modelData.label + header.arrow)
+          color: header.sorted || (header.sortable && headerMouse.containsMouse) ? table.stocks.barForeground : table.stocks.mutedForeground
+          font.family: table.stocks.fontFamily
+          font.pixelSize: Style.font.caption
+          font.bold: header.sorted
+        }
 
         MouseArea {
           id: headerMouse
           anchors.fill: parent
-          enabled: header.modelData.sort !== ""
+          enabled: header.sortable
           hoverEnabled: true
+          acceptedButtons: Qt.LeftButton | Qt.RightButton
           cursorShape: Qt.PointingHandCursor
-          onClicked: table.stocks.cycleSort(header.modelData.sort)
+          onClicked: function(mouse) {
+            if (mouse.button === Qt.RightButton) table.stocks.setSort("", true)
+            else table.stocks.cycleSort(header.modelData.sort)
+          }
         }
       }
     }
   }
+
 
   // ---- One row per symbol, scrolling under the fixed column headers. At
   //      least a few rows stay visible however little room is left.
