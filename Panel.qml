@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import Quickshell
 import Quickshell.Io
 import qs.Commons
@@ -121,6 +122,10 @@ Panel {
     return (symbols.length ? symbols[0] : "") + "\n…"
   }
 
+  // Tallest the panel content may get on this screen; views scroll inside it.
+  readonly property real maxContentHeight: panel.availableCardHeight > 0
+    ? panel.availableCardHeight - panel.verticalContentInset : 100000
+
   // ---- Presentation helpers shared by every row.
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property color mutedForeground: Qt.darker(barForeground, 1.5)
@@ -179,6 +184,7 @@ Panel {
 
   // ---- Level navigation.
   function showDetail(symbol) {
+    detailScroll.contentY = 0
     var quote = null
     for (var i = 0; i < quoteRows.length; i++) if (quoteRows[i].symbol === symbol) quote = quoteRows[i]
     if (!Model.isValid(quote)) return
@@ -220,6 +226,14 @@ Panel {
     root.settings = entry
     if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
       root.bar.shell.updateEntryInline(root.moduleName, entry)
+  }
+
+  // Set key and direction at once ("" = watchlist order; header right-click).
+  function setSort(key, desc) {
+    var k = Model.normalizeSortKey(key)
+    if (k === sortKey && (k === "" || desc === sortDesc)) return
+    updateSettings({ sortKey: k, sortDesc: k === "" ? true : desc })
+    cursorIndex = -1
   }
 
   // Header click: descending -> ascending -> watchlist order.
@@ -826,12 +840,28 @@ Panel {
           width: parent.width
           visible: root.view === "list"
           stocks: root
+          maxHeight: root.maxContentHeight
         }
 
-        DetailView {
+        // Level 2 scrolls as a whole once chart, notes, stats and the agent's
+        // answer outgrow the screen.
+        Flickable {
+          id: detailScroll
           width: parent.width
           visible: root.view === "detail"
-          stocks: root
+          height: Math.min(detailView.implicitHeight, root.maxContentHeight)
+          contentWidth: width
+          contentHeight: detailView.implicitHeight
+          clip: true
+          interactive: contentHeight > height
+          boundsBehavior: Flickable.StopAtBounds
+          ScrollBar.vertical: ScrollBar { policy: detailScroll.interactive ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff }
+
+          DetailView {
+            id: detailView
+            width: detailScroll.width - (detailScroll.interactive ? Style.space(10) : 0)
+            stocks: root
+          }
         }
       }
     }
