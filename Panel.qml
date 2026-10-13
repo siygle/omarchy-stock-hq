@@ -228,6 +228,14 @@ Panel {
       root.bar.shell.updateEntryInline(root.moduleName, entry)
   }
 
+  // Set key and direction at once ("" = watchlist order; header right-click).
+  function setSort(key, desc) {
+    var k = Model.normalizeSortKey(key)
+    if (k === sortKey && (k === "" || desc === sortDesc)) return
+    updateSettings({ sortKey: k, sortDesc: k === "" ? true : desc })
+    cursorIndex = -1
+  }
+
   // Header click: descending -> ascending -> watchlist order.
   function cycleSort(key) {
     if (sortKey !== key) updateSettings({ sortKey: key, sortDesc: key !== "symbol" })
