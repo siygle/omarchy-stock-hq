@@ -432,6 +432,42 @@ Column {
 
   PanelSeparator { foreground: table.stocks.barForeground }
 
+  // ---- Quick sort by daily move (the column headers sort too). The chip
+  //      matching the current sort is highlighted.
+  Row {
+    x: Style.space(8)
+    spacing: Style.space(4)
+
+    readonly property var presets: [
+      { label: "Chg% ↓", key: "changePct", desc: true },
+      { label: "Chg% ↑", key: "changePct", desc: false },
+      { label: "Chg ↓", key: "change", desc: true },
+      { label: "Chg ↑", key: "change", desc: false },
+      { label: "List order", key: "", desc: true }
+    ]
+
+    Text {
+      anchors.verticalCenter: parent.verticalCenter
+      rightPadding: Style.space(4)
+      text: "Sort"
+      color: table.stocks.mutedForeground
+      font.family: table.stocks.fontFamily
+      font.pixelSize: Style.font.caption
+    }
+
+    Repeater {
+      model: parent.presets
+
+      Chip {
+        required property var modelData
+        stocks: table.stocks
+        text: modelData.label
+        selected: modelData.key === table.stocks.sortKey && (modelData.key === "" || modelData.desc === table.stocks.sortDesc)
+        onClicked: table.stocks.setSort(modelData.key, modelData.desc)
+      }
+    }
+  }
+
   // ---- Column headers; sortable ones cycle desc -> asc -> watchlist order.
   Row {
     x: Style.space(8)
