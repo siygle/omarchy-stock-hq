@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.siygle.stock-hq",
   "name": "Stock HQ",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "siygle",
   "license": "MIT",
   "description": "Stock ticker tape with a dense quotes table, per-symbol charts, local AI agent analysis and gist-synced watchlist (Yahoo Finance, no API key).",

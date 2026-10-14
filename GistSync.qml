@@ -54,16 +54,14 @@ Item {
     }
     pushingLists = list || watchlists
     status = "pushing"
-    pushProc.command = Model.gistPushCommand(gistId, gistFile, pushingLists)
-    pushProc.running = true
+    pushProc.start(Model.gistPushCommand(gistId, gistFile, pushingLists))
   }
 
   function create(list) {
     if (busy) return
     status = "creating"
     error = ""
-    createProc.command = Model.gistCreateCommand(gistFile, list || watchlists)
-    createProc.running = true
+    createProc.start(Model.gistCreateCommand(gistFile, list || watchlists))
   }
 
   function fail(result) {
@@ -134,7 +132,7 @@ Item {
     }
   }
 
-  Process {
+  StdinProcess {
     id: pushProc
     stdout: StdioCollector {
       waitForEnd: true
@@ -142,7 +140,7 @@ Item {
     }
   }
 
-  Process {
+  StdinProcess {
     id: createProc
     stdout: StdioCollector {
       waitForEnd: true

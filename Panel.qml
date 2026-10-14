@@ -95,7 +95,7 @@ Panel {
   property var ratesRequested: []
   property int ratesRetries: 0
 
-  readonly property string userAgent: "Mozilla/5.0 (X11; Linux x86_64) omarchy-stock-hq/0.2.0"
+  readonly property string userAgent: "Mozilla/5.0 (X11; Linux x86_64) omarchy-stock-hq/0.3.0"
   readonly property bool loading: quotes.length === 0 && fetchError === ""
   // One row per watchlist symbol, cached rows included ("No cached data" until fetched).
   readonly property var quoteRows: Model.quoteRowsForSymbols(quotes, symbols, "No cached data")
@@ -484,8 +484,7 @@ Panel {
 
   function startFetch() {
     if (fetchProc.running) return
-    fetchProc.command = Model.curlCommand(symbols, userAgent, "1d")
-    fetchProc.running = true
+    fetchProc.start(Model.curlCommand(symbols, userAgent, "1d"))
   }
 
   function handleFetchOutput(text) {
@@ -522,8 +521,7 @@ Panel {
     var pairs = Model.ratePairs(quotes, displayCurrency)
     if (!pairs.length || ratesProc.running) return
     ratesRequested = pairs
-    ratesProc.command = Model.curlCommand(pairs, userAgent, "1d")
-    ratesProc.running = true
+    ratesProc.start(Model.curlCommand(pairs, userAgent, "1d"))
   }
 
   function handleRatesOutput(text) {
@@ -578,8 +576,7 @@ Panel {
     if (chartProc.running) return
     chartRequestedKey = chartKey(detailSymbol, activeRange)
     chartLoading = true
-    chartProc.command = Model.curlCommand([detailSymbol], userAgent, activeRange)
-    chartProc.running = true
+    chartProc.start(Model.curlCommand([detailSymbol], userAgent, activeRange))
   }
 
   function handleChartOutput(text) {
@@ -736,7 +733,7 @@ Panel {
     }
   }
 
-  Process {
+  StdinProcess {
     id: fetchProc
     stdout: StdioCollector {
       waitForEnd: true
@@ -753,7 +750,7 @@ Panel {
     }
   }
 
-  Process {
+  StdinProcess {
     id: chartProc
     stdout: StdioCollector {
       waitForEnd: true
@@ -761,7 +758,7 @@ Panel {
     }
   }
 
-  Process {
+  StdinProcess {
     id: ratesProc
     stdout: StdioCollector {
       waitForEnd: true
