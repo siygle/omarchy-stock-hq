@@ -484,7 +484,9 @@ Panel {
 
   function startFetch() {
     if (fetchProc.running) return
-    fetchProc.command = Model.curlCommand(symbols, userAgent, "1d")
+    var fetchProcSpec = Model.curlCommand(symbols, userAgent, "1d")
+    fetchProc.payload = fetchProcSpec.stdin
+    fetchProc.command = fetchProcSpec.command
     fetchProc.running = true
   }
 
@@ -522,7 +524,9 @@ Panel {
     var pairs = Model.ratePairs(quotes, displayCurrency)
     if (!pairs.length || ratesProc.running) return
     ratesRequested = pairs
-    ratesProc.command = Model.curlCommand(pairs, userAgent, "1d")
+    var ratesProcSpec = Model.curlCommand(pairs, userAgent, "1d")
+    ratesProc.payload = ratesProcSpec.stdin
+    ratesProc.command = ratesProcSpec.command
     ratesProc.running = true
   }
 
@@ -578,7 +582,9 @@ Panel {
     if (chartProc.running) return
     chartRequestedKey = chartKey(detailSymbol, activeRange)
     chartLoading = true
-    chartProc.command = Model.curlCommand([detailSymbol], userAgent, activeRange)
+    var chartProcSpec = Model.curlCommand([detailSymbol], userAgent, activeRange)
+    chartProc.payload = chartProcSpec.stdin
+    chartProc.command = chartProcSpec.command
     chartProc.running = true
   }
 
@@ -738,6 +744,10 @@ Panel {
 
   Process {
     id: fetchProc
+    // Symbol URLs go to curl via stdin (-K -), never argv.
+    property string payload: ""
+    stdinEnabled: true
+    onStarted: { write(payload); payload = "" }
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.handleFetchOutput(text)
@@ -755,6 +765,10 @@ Panel {
 
   Process {
     id: chartProc
+    // Symbol URLs go to curl via stdin (-K -), never argv.
+    property string payload: ""
+    stdinEnabled: true
+    onStarted: { write(payload); payload = "" }
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.handleChartOutput(text)
@@ -763,6 +777,10 @@ Panel {
 
   Process {
     id: ratesProc
+    // Symbol URLs go to curl via stdin (-K -), never argv.
+    property string payload: ""
+    stdinEnabled: true
+    onStarted: { write(payload); payload = "" }
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.handleRatesOutput(text)

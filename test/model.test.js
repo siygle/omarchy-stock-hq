@@ -91,11 +91,14 @@ test("chartUrl: encodes the symbol into the v8 chart endpoint", () => {
   assert.equal(Model.chartUrl("AAPL", "1mo"), "https://query1.finance.yahoo.com/v8/finance/chart/AAPL?range=1mo&interval=1d")
 })
 
-test("curlCommand: one curl, one URL per symbol, newline write-out, custom UA", () => {
-  const cmd = Model.curlCommand(["AAPL", "BTC-USD"], "test-agent/1.0")
-  assert.deepEqual(cmd.slice(0, 8), ["curl", "-sS", "--max-time", "10", "-A", "test-agent/1.0", "-w", "\n"])
-  assert.deepEqual(cmd.slice(8), [Model.chartUrl("AAPL"), Model.chartUrl("BTC-USD")])
-  assert.deepEqual(Model.curlCommand(["AAPL"], "ua", "6mo").slice(8), [Model.chartUrl("AAPL", "6mo")])
+test("curlCommand: symbols go to curl config on stdin, never argv", () => {
+  const spec = Model.curlCommand(["AAPL", "BTC-USD"], "test-agent/1.0")
+  const argv = spec.command.join("\u0000")
+  assert.ok(!argv.includes("AAPL") && !argv.includes("BTC-USD") && !argv.includes("http"))
+  assert.equal(spec.command[5], "test-agent/1.0")
+  assert.equal(spec.command[4], String(Buffer.byteLength(spec.stdin)))
+  assert.equal(spec.stdin, 'url = ' + JSON.stringify(Model.chartUrl("AAPL", "1d")) + '\nurl = ' + JSON.stringify(Model.chartUrl("BTC-USD", "1d")) + '\n')
+  assert.ok(Model.curlCommand(["AAPL"], "ua", "6mo").stdin.includes(JSON.stringify(Model.chartUrl("AAPL", "6mo"))))
 })
 
 test("quoteUrl / shellQuote", () => {
@@ -597,18 +600,34 @@ test("normalizeGistId accepts ids and URLs; normalizeGistFile defaults", () => {
   assert.equal(Model.normalizeGistFile("list.txt"), "list.txt")
 })
 
-test("gist commands run through the sh wrapper with positional args", () => {
+test("gist commands keep watchlist content out of argv (stdin only)", () => {
   const id = "0123456789abcdef0123456789abcdef"
   const pull = Model.gistPullCommand(id, "stocks.json")
   assert.equal(pull[0], "sh")
   assert.deepEqual(pull.slice(3), ["sh", id, '.files["stocks.json"].content'])
-  const lists = [{ name: "Main", symbols: ["AAPL"] }]
+  const lists = [{ name: "Secret Plan 機密", symbols: ["ZZSECRET", "2330.TW"] }]
   const push = Model.gistPushCommand(id, "stocks.json", lists)
-  assert.equal(push[4], id)
-  assert.deepEqual(JSON.parse(push[5]), { files: { "stocks.json": { content: Model.serializeWatchlists(lists) } } })
-  const create = JSON.parse(Model.gistCreateCommand("stocks.json", lists)[4])
-  assert.equal(create.public, false)
-  assert.ok(create.files["stocks.json"].content.includes("AAPL"))
+  const create = Model.gistCreateCommand("stocks.json", lists)
+  for (const spec of [push, create]) {
+    const argv = spec.command.join("\u0000")
+    for (const leak of ["Secret Plan", "機密", "ZZSECRET", "2330.TW", "watchlists", "\"files\""]) assert.ok(!argv.includes(leak), leak)
+    assert.ok(spec.command[2].includes("--input -"))
+  }
+  assert.equal(push.command[4], id)
+  assert.equal(push.command[5], String(Buffer.byteLength(push.stdin)))
+  assert.deepEqual(JSON.parse(push.stdin), { files: { "stocks.json": { content: Model.serializeWatchlists(lists) } } })
+  const body = JSON.parse(create.stdin)
+  assert.equal(create.command[4], String(Buffer.byteLength(create.stdin)))
+  assert.equal(body.public, false)
+  assert.ok(body.files["stocks.json"].content.includes("ZZSECRET"))
+})
+
+test("stdin payload reaches the inner command intact without EOF (real sh)", () => {
+  const { spawnSync } = require("node:child_process")
+  const payload = '{"name":"它\'s \\"q\\" $HOME 🚀"}'
+  const spec = Model.stdinCommand('head -c "$1" | cat', [String(Model.utf8Length(payload))], payload)
+  assert.equal(Model.utf8Length(payload), Buffer.byteLength(payload))
+  assert.equal(spawnSync(spec.command[0], spec.command.slice(1), { input: payload + "TRAILING" }).stdout.toString(), payload)
 })
 
 test("ghCommand wrapper reports exit code and merged output (real sh)", () => {

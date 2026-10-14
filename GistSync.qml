@@ -54,7 +54,9 @@ Item {
     }
     pushingLists = list || watchlists
     status = "pushing"
-    pushProc.command = Model.gistPushCommand(gistId, gistFile, pushingLists)
+    var spec = Model.gistPushCommand(gistId, gistFile, pushingLists)
+    pushProc.payload = spec.stdin
+    pushProc.command = spec.command
     pushProc.running = true
   }
 
@@ -62,7 +64,9 @@ Item {
     if (busy) return
     status = "creating"
     error = ""
-    createProc.command = Model.gistCreateCommand(gistFile, list || watchlists)
+    var spec = Model.gistCreateCommand(gistFile, list || watchlists)
+    createProc.payload = spec.stdin
+    createProc.command = spec.command
     createProc.running = true
   }
 
@@ -136,6 +140,10 @@ Item {
 
   Process {
     id: pushProc
+    // Watchlist JSON goes to stdin, never argv (visible in ps to other users).
+    property string payload: ""
+    stdinEnabled: true
+    onStarted: { write(payload); payload = "" }
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: sync.handlePush(text)
@@ -144,6 +152,10 @@ Item {
 
   Process {
     id: createProc
+    // Watchlist JSON goes to stdin, never argv (visible in ps to other users).
+    property string payload: ""
+    stdinEnabled: true
+    onStarted: { write(payload); payload = "" }
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: sync.handleCreate(text)

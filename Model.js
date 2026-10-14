@@ -161,10 +161,35 @@ function scrollSpeed(value, fallback) {
 // JSON document per line in request order. Deliberately no `-f`: a 404 for an
 // unknown symbol then still yields Yahoo's error JSON on its own line instead
 // of an empty line, which keeps the other symbols' lines aligned.
+// Watchlist symbols are user data: they must not show up in any process
+// command line (ps/proc are world-readable). The URLs reach curl as a config
+// file on stdin (`-K -`); argv only carries fixed flags, the user agent and
+// the payload byte length. Returns { command, stdin }.
 function curlCommand(symbols, userAgent, range) {
-  var cmd = ["curl", "-sS", "--max-time", "10", "-A", String(userAgent || "omarchy-stock-hq"), "-w", "\n"]
-  for (var i = 0; i < symbols.length; i++) cmd.push(chartUrl(symbols[i], range))
-  return cmd
+  var config = ""
+  for (var i = 0; i < symbols.length; i++) config += "url = " + JSON.stringify(chartUrl(symbols[i], range)) + "\n"
+  return stdinCommand("head -c \"$1\" | curl -sS --max-time 10 -A \"$2\" -w '\\n' -K -",
+    [String(utf8Length(config)), String(userAgent || "omarchy-stock-hq")], config)
+}
+
+// UTF-8 byte length (QML's JS engine has no TextEncoder/Buffer).
+function utf8Length(text) {
+  var s = String(text), n = 0
+  for (var i = 0; i < s.length; i++) {
+    var c = s.charCodeAt(i)
+    if (c < 0x80) n += 1
+    else if (c < 0x800) n += 2
+    else if (c >= 0xD800 && c <= 0xDBFF) { n += 4; i++ }
+    else n += 3
+  }
+  return n
+}
+
+// A command whose sensitive payload is written to the Process stdin instead of
+// argv. The script reads exactly `$1` bytes (`head -c "$1"`), so it does not
+// depend on stdin being closed after the write.
+function stdinCommand(script, args, payload) {
+  return { command: ["sh", "-c", script, "sh"].concat(args || []), stdin: String(payload) }
 }
 
 function quoteUrl(symbol) {
@@ -1124,18 +1149,23 @@ function gistPullCommand(id, file) {
     [normalizeGistId(id), ".files[" + JSON.stringify(normalizeGistFile(file)) + "].content"])
 }
 
-// The JSON body goes through stdin (`--input -`) so file names and content
-// never need gh's `-f key[sub]=value` escaping.
+// The JSON body (watchlist names and symbols) is written to the Process
+// stdin, never argv: the outer sh reads exactly $2 bytes and pipes them to
+// `gh api --input -`. argv carries only the gist id and the byte length.
+// Returns { command, stdin }.
 function gistPushCommand(id, file, watchlists) {
-  return ghCommand("printf '%s' \"$2\" | gh api -X PATCH \"gists/$1\" --input - --jq .id",
-    [normalizeGistId(id), gistBody(file, watchlists)])
+  var body = gistBody(file, watchlists)
+  return { command: ghCommand("head -c \"$2\" | gh api -X PATCH \"gists/$1\" --input - --jq .id",
+    [normalizeGistId(id), String(utf8Length(body))]), stdin: body }
 }
 
 function gistCreateCommand(file, watchlists) {
   var body = JSON.parse(gistBody(file, watchlists))
   body.public = false
   body.description = "omarchy-stocks watchlist"
-  return ghCommand("printf '%s' \"$1\" | gh api -X POST gists --input - --jq .id", [JSON.stringify(body)])
+  var text = JSON.stringify(body)
+  return { command: ghCommand("head -c \"$1\" | gh api -X POST gists --input - --jq .id",
+    [String(utf8Length(text))]), stdin: text }
 }
 
 // ---- Local agent runs.
@@ -1326,6 +1356,8 @@ if (typeof module !== "undefined") {
     cycleSeconds: cycleSeconds,
     chartUrl: chartUrl,
     curlCommand: curlCommand,
+    stdinCommand: stdinCommand,
+    utf8Length: utf8Length,
     quoteUrl: quoteUrl,
     shellQuote: shellQuote,
     emptyQuote: emptyQuote,
