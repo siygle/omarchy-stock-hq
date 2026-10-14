@@ -54,9 +54,7 @@ Item {
     cancelRequested = false
     now = Date.now()
     setResult(symbol, { status: "running", output: "", prompt: promptName, at: now, exitCode: null })
-    agentProc.command = ["sh", "-c", "mkdir -p \"$1\" && cd \"$1\" && shift && exec \"$@\" </dev/null 2>&1", "sh", cacheDir]
-      .concat(Model.agentArgv(command, prompt))
-    agentProc.running = true
+    agentProc.start(Model.agentCommand(command, prompt, cacheDir))
     return true
   }
 
@@ -86,7 +84,7 @@ Item {
     runningSymbol = ""
   }
 
-  Process {
+  StdinProcess {
     id: agentProc
     stdout: SplitParser {
       onRead: function(line) {

@@ -661,10 +661,24 @@ test("fillPrompt substitutes quote fields, {quote} JSON, and keeps unknown place
   assert.equal(json.series, undefined)
 })
 
-test("agentArgv substitutes {prompt} or appends it", () => {
-  assert.deepEqual(Model.agentArgv(["claude", "-p", "{prompt}"], "hi there"), ["claude", "-p", "hi there"])
-  assert.deepEqual(Model.agentArgv(["gemini", "-p"], "x"), ["gemini", "-p", "x"])
-  assert.deepEqual(Model.agentArgv(["tool", "--q={prompt}"], "x"), ["tool", "--q=x"])
+test("agentArgv sends the prompt on stdin; only an embedded {prompt} stays in argv", () => {
+  assert.deepEqual(Model.agentArgv(["claude", "-p", "{prompt}"], "hi there"), { argv: ["claude", "-p"], stdin: "hi there" })
+  assert.deepEqual(Model.agentArgv(["codex", "exec"], "x"), { argv: ["codex", "exec"], stdin: "x" })
+  assert.deepEqual(Model.agentArgv(["tool", "--q={prompt}"], "x"), { argv: ["tool", "--q=x"], stdin: "" })
+  assert.deepEqual(Model.agentArgv(null, "x").argv, Model.DEFAULT_AGENT_COMMAND)
+})
+
+test("agentCommand keeps the symbol and quote out of argv and the prompt reaches the CLI (real sh)", () => {
+  const { spawnSync } = require("node:child_process")
+  const os = require("node:os"), path = require("node:path")
+  const dir = path.join(os.tmpdir(), "stock-hq-agent-" + process.pid)
+  const prompt = Model.agentPrompt("Is this a good entry? 它's \"q\" $HOME", fullQuote())
+  const spec = Model.agentCommand(["sh", "-c", "pwd; cat", "{prompt}"], prompt, dir)
+  const argv = spec.command.join("\u0000")
+  for (const leak of ["AAPL", "Apple", "good entry"]) assert.ok(!argv.includes(leak), leak)
+  const out = spawnSync(spec.command[0], spec.command.slice(1), { input: spec.stdin }).stdout.toString()
+  assert.equal(out, require("node:fs").realpathSync(dir) + "\n" + prompt)
+  require("node:fs").rmSync(dir, { recursive: true, force: true })
 })
 
 test("agentFileName / formatElapsed", () => {

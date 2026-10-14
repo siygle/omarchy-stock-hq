@@ -186,8 +186,8 @@ function utf8Length(text) {
 }
 
 // A command whose sensitive payload is written to the Process stdin instead of
-// argv. The script reads exactly `$1` bytes (`head -c "$1"`), so it does not
-// depend on stdin being closed after the write.
+// argv. StdinProcess closes stdin after the write; reading exactly `$1` bytes
+// (`head -c "$1"`) also keeps the payload intact without relying on that EOF.
 function stdinCommand(script, args, payload) {
   return { command: ["sh", "-c", script, "sh"].concat(args || []), stdin: String(payload) }
 }
@@ -1170,7 +1170,7 @@ function gistCreateCommand(file, watchlists) {
 
 // ---- Local agent runs.
 
-var DEFAULT_AGENT_COMMAND = ["claude", "-p", "--allowedTools=WebSearch,WebFetch", "{prompt}"]
+var DEFAULT_AGENT_COMMAND = ["claude", "-p", "--allowedTools=WebSearch,WebFetch"]
 
 var DEFAULT_AGENT_PROMPTS = [
   { name: "Quick take", prompt: "You are an equity research assistant. Give a concise take on {name} ({symbol}, {exchange}). Latest quote data: {quote}. Cover what moved it recently, key price levels, main risks, and finish with a one-line verdict. Markdown, under 250 words." },
@@ -1260,21 +1260,35 @@ function agentPrompt(template, quote) {
     "Latest quote: " + JSON.stringify(quoteSummary(quote)) + "\n\n" + filled
 }
 
-// Command template -> argv with `{prompt}` substituted (appended when absent).
+// Command template -> { argv, stdin }. The prompt carries the symbol and its
+// quote, so it goes to the CLI's stdin (`claude -p`, `codex exec` read it from
+// there) rather than argv. A standalone `{prompt}` argument is accepted and
+// dropped for older settings. Only a `{prompt}` embedded in a larger argument
+// (`--q={prompt}`) is still substituted into argv, since that CLI has no
+// other way to receive it.
 function agentArgv(command, prompt) {
   var base = normalizeAgentCommand(command)
   var out = []
-  var used = false
+  var embedded = false
   for (var i = 0; i < base.length; i++) {
+    if (base[i] === "{prompt}") continue
     if (base[i].indexOf("{prompt}") !== -1) {
       out.push(base[i].split("{prompt}").join(String(prompt)))
-      used = true
+      embedded = true
     } else {
       out.push(base[i])
     }
   }
-  if (!used) out.push(String(prompt))
-  return out
+  return { argv: out, stdin: embedded ? "" : String(prompt) }
+}
+
+// The agent runs in `dir` (its cache folder) with the prompt on stdin. `exec`
+// keeps the CLI as the process Quickshell started, so cancelling stops it.
+// Returns { command, stdin }.
+function agentCommand(command, prompt, dir) {
+  var a = agentArgv(command, prompt)
+  return { command: ["sh", "-c", "mkdir -p \"$1\" && cd \"$1\" && shift && exec \"$@\" 2>&1", "sh", String(dir)].concat(a.argv),
+    stdin: a.stdin }
 }
 
 // File-system safe name for a symbol's cached analysis ("^GSPC" -> "_GSPC").
@@ -1341,6 +1355,7 @@ if (typeof module !== "undefined") {
     fillPrompt: fillPrompt,
     agentPrompt: agentPrompt,
     agentArgv: agentArgv,
+    agentCommand: agentCommand,
     agentFileName: agentFileName,
     agentFileText: agentFileText,
     parseAgentFile: parseAgentFile,

@@ -134,10 +134,15 @@ its answer into the panel (rendered as Markdown), and keeps the latest answer
 per symbol in `~/.cache/omarchy-stocks/agent/<SYMBOL>.md`. One run at a time;
 `Cancel` stops it.
 
+The prompt (symbol and quote) is written to the agent's stdin, not its
+command line, which other local users can read through `ps`. A standalone
+`"{prompt}"` argument from older settings is ignored; only a placeholder inside
+a larger argument (`"--prompt={prompt}"`) is still substituted into argv.
+
 ```sh
-# the default; any CLI that takes a prompt argument and prints the answer works
-omarchy bar set io.github.siygle.stock-hq agentCommand '["claude","-p","--allowedTools=WebSearch,WebFetch","{prompt}"]' --json
-omarchy bar set io.github.siygle.stock-hq agentCommand '["codex","exec","{prompt}"]' --json
+# the default; any CLI that reads the prompt from stdin and prints the answer works
+omarchy bar set io.github.siygle.stock-hq agentCommand '["claude","-p","--allowedTools=WebSearch,WebFetch"]' --json
+omarchy bar set io.github.siygle.stock-hq agentCommand '["codex","exec"]' --json
 omarchy bar set io.github.siygle.stock-hq agentPrompts '[{"name":"繁中快評","prompt":"用繁體中文分析 {name} ({symbol})，最新報價：{quote}"}]' --json
 ```
 
@@ -179,7 +184,7 @@ omarchy bar set io.github.siygle.stock-hq compact true --json    # "AAPL ▲0.42
 | `sortKey` / `sortDesc` | `""` / `true` | table sort (the column headers set these); `""` = watchlist order |
 | `gistId` | `""` (off) | gist id or URL for watchlist sync |
 | `gistFile` | `stocks.json` | file inside the gist |
-| `agentCommand` | `["claude","-p","--allowedTools=WebSearch,WebFetch","{prompt}"]` | agent argv; `{prompt}` is replaced (appended when absent) |
+| `agentCommand` | `["claude","-p","--allowedTools=WebSearch,WebFetch"]` | agent argv; the prompt goes to its stdin |
 | `agentPrompts` | Quick take / Technical / News & catalysts | `[{"name": …, "prompt": …}]` preset chips |
 
 Unknown symbols show as `Not Found` in the panel and are left out of the tape.

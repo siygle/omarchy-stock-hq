@@ -484,10 +484,7 @@ Panel {
 
   function startFetch() {
     if (fetchProc.running) return
-    var fetchProcSpec = Model.curlCommand(symbols, userAgent, "1d")
-    fetchProc.payload = fetchProcSpec.stdin
-    fetchProc.command = fetchProcSpec.command
-    fetchProc.running = true
+    fetchProc.start(Model.curlCommand(symbols, userAgent, "1d"))
   }
 
   function handleFetchOutput(text) {
@@ -524,10 +521,7 @@ Panel {
     var pairs = Model.ratePairs(quotes, displayCurrency)
     if (!pairs.length || ratesProc.running) return
     ratesRequested = pairs
-    var ratesProcSpec = Model.curlCommand(pairs, userAgent, "1d")
-    ratesProc.payload = ratesProcSpec.stdin
-    ratesProc.command = ratesProcSpec.command
-    ratesProc.running = true
+    ratesProc.start(Model.curlCommand(pairs, userAgent, "1d"))
   }
 
   function handleRatesOutput(text) {
@@ -582,10 +576,7 @@ Panel {
     if (chartProc.running) return
     chartRequestedKey = chartKey(detailSymbol, activeRange)
     chartLoading = true
-    var chartProcSpec = Model.curlCommand([detailSymbol], userAgent, activeRange)
-    chartProc.payload = chartProcSpec.stdin
-    chartProc.command = chartProcSpec.command
-    chartProc.running = true
+    chartProc.start(Model.curlCommand([detailSymbol], userAgent, activeRange))
   }
 
   function handleChartOutput(text) {
@@ -742,12 +733,8 @@ Panel {
     }
   }
 
-  Process {
+  StdinProcess {
     id: fetchProc
-    // Symbol URLs go to curl via stdin (-K -), never argv.
-    property string payload: ""
-    stdinEnabled: true
-    onStarted: { write(payload); payload = "" }
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.handleFetchOutput(text)
@@ -763,24 +750,16 @@ Panel {
     }
   }
 
-  Process {
+  StdinProcess {
     id: chartProc
-    // Symbol URLs go to curl via stdin (-K -), never argv.
-    property string payload: ""
-    stdinEnabled: true
-    onStarted: { write(payload); payload = "" }
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.handleChartOutput(text)
     }
   }
 
-  Process {
+  StdinProcess {
     id: ratesProc
-    // Symbol URLs go to curl via stdin (-K -), never argv.
-    property string payload: ""
-    stdinEnabled: true
-    onStarted: { write(payload); payload = "" }
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.handleRatesOutput(text)
