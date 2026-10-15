@@ -681,6 +681,46 @@ test("agentCommand keeps the symbol and quote out of argv and the prompt reaches
   require("node:fs").rmSync(dir, { recursive: true, force: true })
 })
 
+test("agentCommand creates the answer folder 0700 and tightens an existing one (real sh)", () => {
+  const { spawnSync } = require("node:child_process")
+  const fs = require("node:fs"), os = require("node:os"), path = require("node:path")
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "stock-hq-agent-mode-"))
+  const dir = path.join(base, "agent")
+  const spec = Model.agentCommand(["sh", "-c", "umask"], "x", dir)
+  const run = () => spawnSync("sh", ["-c", "umask 022; exec \"$@\"", "sh"].concat(spec.command), { input: spec.stdin }).stdout.toString().trim()
+  assert.equal(run(), "0022")  // the agent keeps the user's umask
+  assert.equal(fs.statSync(dir).mode & 0o777, 0o700)
+  fs.chmodSync(dir, 0o755)
+  run()
+  assert.equal(fs.statSync(dir).mode & 0o777, 0o700)
+  fs.rmSync(base, { recursive: true, force: true })
+})
+
+test("privateStorageCommand makes dirs 0700 and files 0600 under umask 022 (real sh)", () => {
+  const { spawnSync } = require("node:child_process")
+  const fs = require("node:fs"), os = require("node:os"), path = require("node:path")
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "stock-hq-storage-"))
+  const dataDir = path.join(base, "share", "omarchy-stock-hq"), stateDir = path.join(base, "state")
+  const lists = path.join(dataDir, "watchlists.json"), cache = path.join(stateDir, "cache.json")
+  fs.mkdirSync(stateDir, { mode: 0o755 })
+  fs.writeFileSync(cache, "{\"version\":1}\n", { mode: 0o644 })
+  fs.chmodSync(stateDir, 0o755); fs.chmodSync(cache, 0o644)
+  const missing = path.join(base, "nope", "x.json")
+  const cmd = Model.privateStorageCommand([dataDir, stateDir], [lists, cache, missing])
+  const r = spawnSync("sh", ["-c", "umask 022; exec \"$@\"", "sh"].concat(cmd))
+  assert.equal(r.status, 0)
+  const mode = (p) => fs.statSync(p).mode & 0o777
+  assert.equal(mode(dataDir), 0o700)
+  assert.equal(mode(stateDir), 0o700)
+  assert.equal(mode(lists), 0o600)
+  assert.equal(fs.readFileSync(lists, "utf8"), "")
+  assert.equal(mode(cache), 0o600)
+  assert.equal(fs.readFileSync(cache, "utf8"), "{\"version\":1}\n")  // contents untouched
+  assert.equal(fs.existsSync(missing), false)
+  assert.equal(Model.privateStorageCommand([], ["/a b/$HOME.json"]).slice(-2).join("|"), "--|/a b/$HOME.json")
+  fs.rmSync(base, { recursive: true, force: true })
+})
+
 test("agentFileName / formatElapsed", () => {
   assert.equal(Model.agentFileName("^GSPC"), "_GSPC.md")
   assert.equal(Model.agentFileName("EURUSD=X"), "EURUSD=X.md")

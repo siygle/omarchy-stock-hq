@@ -1285,10 +1285,26 @@ function agentArgv(command, prompt) {
 // The agent runs in `dir` (its cache folder) with the prompt on stdin. `exec`
 // keeps the CLI as the process Quickshell started, so cancelling stops it.
 // Returns { command, stdin }.
+// The folder is created/tightened to 0700 (umask in a subshell, so the agent
+// itself keeps the user's umask) because saved answers name the symbols.
 function agentCommand(command, prompt, dir) {
   var a = agentArgv(command, prompt)
-  return { command: ["sh", "-c", "mkdir -p \"$1\" && cd \"$1\" && shift && exec \"$@\" 2>&1", "sh", String(dir)].concat(a.argv),
+  return { command: ["sh", "-c", "(umask 077 && mkdir -p \"$1\") && chmod 700 \"$1\" && cd \"$1\" && shift && exec \"$@\" 2>&1", "sh", String(dir)].concat(a.argv),
     stdin: a.stdin }
+}
+
+// Watchlists and the quote cache are private, but FileView's QSaveFile creates
+// new files 0666 & ~umask. This makes `dirs` 0700 and `files` 0600, creating
+// missing files empty: QSaveFile keeps an existing file's mode on every later
+// atomic write. chmod also repairs files earlier versions left 0644.
+// Failures are ignored (e.g. a custom path whose folder does not exist).
+function privateStorageCommand(dirs, files) {
+  var script = "umask 077\n" +
+    "while [ \"$#\" -gt 0 ] && [ \"$1\" != -- ]; do mkdir -p -- \"$1\" && chmod 700 -- \"$1\"; shift; done\n" +
+    "[ \"$#\" -gt 0 ] && shift\n" +
+    "for f in \"$@\"; do { [ -e \"$f\" ] || true > \"$f\"; } 2>/dev/null && chmod 600 -- \"$f\"; done\n" +
+    "exit 0"
+  return ["sh", "-c", script, "sh"].concat((dirs || []).map(String), ["--"], (files || []).map(String))
 }
 
 // File-system safe name for a symbol's cached analysis ("^GSPC" -> "_GSPC").
@@ -1356,6 +1372,7 @@ if (typeof module !== "undefined") {
     agentPrompt: agentPrompt,
     agentArgv: agentArgv,
     agentCommand: agentCommand,
+    privateStorageCommand: privateStorageCommand,
     agentFileName: agentFileName,
     agentFileText: agentFileText,
     parseAgentFile: parseAgentFile,

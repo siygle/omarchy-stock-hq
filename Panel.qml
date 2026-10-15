@@ -358,7 +358,8 @@ Panel {
       target += defaultExportFilename()
     }
     exportFile.path = target
-    exportFile.setText(JSON.stringify({ version: 1, activeWatchlist: activeWatchlist, watchlists: Model.cloneWatchlists(watchlists) }, null, 2) + "\n")
+    exportPrepProc.command = Model.privateStorageCommand([], [target])
+    exportPrepProc.running = true
     fileDialogMessage = "Exported " + target
   }
 
@@ -657,10 +658,9 @@ Panel {
 
   // Deferred so the first fetch sees the settings BarWidget injects right
   // after this component loads (Loader.onLoaded runs before callLater fires).
-  Component.onCompleted: {
-    cacheDirProc.running = true
-    Qt.callLater(function() { watchlistsFile.reload(); cacheFile.reload(); root.startFetch() })
-  }
+  // Storage is made owner-only first (storageProc then loads and fetches), so
+  // nothing is read or written before the files are 0600.
+  Component.onCompleted: Qt.callLater(function() { storageProc.running = true })
 
   FileView {
     id: watchlistsFile
@@ -695,8 +695,15 @@ Panel {
   }
 
   Process {
-    id: cacheDirProc
-    command: ["mkdir", "-p", root.cacheDir, root.watchlistsDir]
+    id: storageProc
+    command: Model.privateStorageCommand([root.cacheDir, root.watchlistsDir], [root.watchlistsPath, root.cachePath])
+    onExited: Qt.callLater(function() { watchlistsFile.reload(); cacheFile.reload(); root.startFetch() })
+  }
+
+  // An export holds the same private lists: create the target 0600 first.
+  Process {
+    id: exportPrepProc
+    onExited: exportFile.setText(JSON.stringify({ version: 1, activeWatchlist: root.activeWatchlist, watchlists: Model.cloneWatchlists(root.watchlists) }, null, 2) + "\n")
   }
 
   Process {
