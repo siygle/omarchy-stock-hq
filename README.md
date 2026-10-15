@@ -160,7 +160,9 @@ notes for the chart range on screen, as JSON).
 
 UI preferences live on the widget's entry in `~/.config/omarchy/shell.json` and
 apply instantly. Fetched quotes and charts are cached separately in
-`~/.local/state/omarchy-stock-hq/cache.json`.
+`~/.local/state/omarchy-stock-hq/cache.json`. Watchlists, the cache, exports
+and saved agent answers are owner-only (files `0600`, folders `0700`); files
+left readable by earlier versions are tightened on start.
 
 ```sh
 omarchy bar set io.github.siygle.stock-hq tickerWidth 260
