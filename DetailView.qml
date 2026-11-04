@@ -306,20 +306,43 @@ Column {
     }
   }
 
-  Text {
-    leftPadding: Style.space(8)
-    text: "Open on Yahoo Finance ↗"
-    color: linkMouse.containsMouse ? detail.stocks.barForeground : detail.stocks.mutedForeground
-    font.family: detail.stocks.fontFamily
-    font.pixelSize: Style.font.caption
-    font.underline: linkMouse.containsMouse
+  Row {
+    spacing: Style.space(12)
 
-    MouseArea {
-      id: linkMouse
-      anchors.fill: parent
-      hoverEnabled: true
-      cursorShape: Qt.PointingHandCursor
-      onClicked: if (detail.quote) detail.stocks.openQuotePage(detail.quote.symbol)
+    Text {
+      leftPadding: Style.space(8)
+      text: "Open on Yahoo Finance ↗"
+      color: linkMouse.containsMouse ? detail.stocks.barForeground : detail.stocks.mutedForeground
+      font.family: detail.stocks.fontFamily
+      font.pixelSize: Style.font.caption
+      font.underline: linkMouse.containsMouse
+
+      MouseArea {
+        id: linkMouse
+        anchors.fill: parent
+        hoverEnabled: true
+        cursorShape: Qt.PointingHandCursor
+        onClicked: if (detail.quote) detail.stocks.openQuotePage(detail.quote.symbol)
+      }
+    }
+
+    Text {
+      visible: detail.stocks.openInAppSetting
+      text: detail.stocks.appAvailable ? "在 App 開啟 ↗  (o)" : "在 App 開啟：未安裝 stock-hq-app"
+      color: detail.stocks.appAvailable && appMouse.containsMouse ? detail.stocks.barForeground : detail.stocks.mutedForeground
+      opacity: detail.stocks.appAvailable ? 1 : 0.6
+      font.family: detail.stocks.fontFamily
+      font.pixelSize: Style.font.caption
+      font.underline: detail.stocks.appAvailable && appMouse.containsMouse
+
+      MouseArea {
+        id: appMouse
+        anchors.fill: parent
+        hoverEnabled: true
+        enabled: detail.stocks.appAvailable
+        cursorShape: Qt.PointingHandCursor
+        onClicked: if (detail.quote) detail.stocks.openInApp(detail.quote.symbol)
+      }
     }
   }
 

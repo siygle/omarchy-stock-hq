@@ -156,6 +156,15 @@ Prompts (presets and the custom field) can also use `{symbol} {name} {exchange}
 {week52High} {volume}` and `{quote}` (all quote fields, plus the technical
 notes for the chart range on screen, as JSON).
 
+## Open in stock-hq-app
+
+If the desktop companion [stock-hq-app](https://github.com/siygle/stock-hq-app) is installed, the detail view shows **在 App 開啟 ↗**. Press `o` on a table row or in the detail view to open that symbol in the app. The bar panel then closes, and a running app window focuses on the new tab.
+
+- The plugin runs `stock-hq-app open <SYM>` when the binary is on `PATH` or at `~/.local/bin/stock-hq-app`. Otherwise it uses `xdg-open stockhq://symbol/<SYM>` if a `x-scheme-handler/stockhq` handler is registered.
+- If neither is found, the link reads "未安裝 stock-hq-app" and does nothing. The plugin checks again each time the panel opens.
+- Turn it off with the `openInApp` setting: `omarchy bar set <widget-id> openInApp false`.
+- Both read the same `~/.local/share/omarchy-stock-hq/watchlists.json`.
+
 ## Configure
 
 UI preferences live on the widget's entry in `~/.config/omarchy/shell.json` and
