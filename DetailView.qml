@@ -306,20 +306,43 @@ Column {
     }
   }
 
-  Text {
-    leftPadding: Style.space(8)
-    text: "Open on Yahoo Finance ↗"
-    color: linkMouse.containsMouse ? detail.stocks.barForeground : detail.stocks.mutedForeground
-    font.family: detail.stocks.fontFamily
-    font.pixelSize: Style.font.caption
-    font.underline: linkMouse.containsMouse
+  Row {
+    spacing: Style.space(12)
 
-    MouseArea {
-      id: linkMouse
-      anchors.fill: parent
-      hoverEnabled: true
-      cursorShape: Qt.PointingHandCursor
-      onClicked: if (detail.quote) detail.stocks.openQuotePage(detail.quote.symbol)
+    Text {
+      leftPadding: Style.space(8)
+      text: "Open on Yahoo Finance ↗"
+      color: linkMouse.containsMouse ? detail.stocks.barForeground : detail.stocks.mutedForeground
+      font.family: detail.stocks.fontFamily
+      font.pixelSize: Style.font.caption
+      font.underline: linkMouse.containsMouse
+
+      MouseArea {
+        id: linkMouse
+        anchors.fill: parent
+        hoverEnabled: true
+        cursorShape: Qt.PointingHandCursor
+        onClicked: if (detail.quote) detail.stocks.openQuotePage(detail.quote.symbol)
+      }
+    }
+
+    Text {
+      // Only shown when stock-hq-app is installed and openInApp is on; otherwise the plugin stays standalone.
+      visible: detail.stocks.appAvailable
+      text: "在 App 開啟 ↗  (o)"
+      color: appMouse.containsMouse ? detail.stocks.barForeground : detail.stocks.mutedForeground
+      font.family: detail.stocks.fontFamily
+      font.pixelSize: Style.font.caption
+      font.underline: appMouse.containsMouse
+
+      MouseArea {
+        id: appMouse
+        anchors.fill: parent
+        hoverEnabled: true
+        enabled: detail.stocks.appAvailable
+        cursorShape: Qt.PointingHandCursor
+        onClicked: if (detail.quote) detail.stocks.openInApp(detail.quote.symbol)
+      }
     }
   }
 

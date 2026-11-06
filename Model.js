@@ -192,6 +192,43 @@ function stdinCommand(script, args, payload) {
   return { command: ["sh", "-c", script, "sh"].concat(args || []), stdin: String(payload) }
 }
 
+// ---- stock-hq-app (desktop companion) launch.
+var APP_URL_PREFIX = "stockhq://symbol/"
+
+function appUrl(symbol) {
+  var sym = normalizeSymbol(symbol)
+  return sym === "" ? "" : APP_URL_PREFIX + encodeURIComponent(sym)
+}
+
+// Probe output: first line = binary path (or empty), second = xdg-mime handler.
+function parseAppProbe(text) {
+  var lines = String(text || "").split("\n").map(trimString)
+  var path = lines[0] || ""
+  if (path !== "" && path.charAt(0) !== "/") path = ""
+  var handler = lines[1] || ""
+  return { path: path, handler: handler, available: path !== "" || handler !== "" }
+}
+
+var APP_PROBE_SCRIPT = 'p=$(command -v stock-hq-app 2>/dev/null); [ -z "$p" ] && [ -x "$HOME/.local/bin/stock-hq-app" ] && p="$HOME/.local/bin/stock-hq-app"; echo "$p"; xdg-mime query default x-scheme-handler/stockhq 2>/dev/null; true'
+
+function appProbeCommand() {
+  return ["sh", "-c", APP_PROBE_SCRIPT]
+}
+
+// The companion link (button, `o` key) exists only when the app is installed
+// and the openInApp setting is not false. Otherwise nothing app-related is shown.
+function appLinkEnabled(setting, probe) {
+  return setting !== false && String(setting) !== "false" && !!(probe && probe.available)
+}
+
+// Shell line for bar.run(): binary if known, else the URL handler.
+function appLaunchCommand(symbol, probe) {
+  var sym = normalizeSymbol(symbol)
+  if (sym === "" || !probe || !probe.available) return ""
+  if (probe.path !== "") return shellQuote(probe.path) + " open " + shellQuote(sym)
+  return "xdg-open " + shellQuote(appUrl(sym))
+}
+
 function quoteUrl(symbol) {
   return QUOTE_PAGE_URL + encodeURIComponent(String(symbol))
 }
@@ -1337,6 +1374,11 @@ function formatElapsed(seconds) {
 
 if (typeof module !== "undefined") {
   module.exports = {
+    appUrl: appUrl,
+    parseAppProbe: parseAppProbe,
+    appProbeCommand: appProbeCommand,
+    appLinkEnabled: appLinkEnabled,
+    appLaunchCommand: appLaunchCommand,
     rangePosition: rangePosition,
     gapPct: gapPct,
     dayRangePct: dayRangePct,

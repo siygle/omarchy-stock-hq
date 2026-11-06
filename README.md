@@ -156,6 +156,36 @@ Prompts (presets and the custom field) can also use `{symbol} {name} {exchange}
 {week52High} {volume}` and `{quote}` (all quote fields, plus the technical
 notes for the chart range on screen, as JSON).
 
+## Open in stock-hq-app
+
+[stock-hq-app](https://github.com/siygle/stock-hq-app) is an optional native
+desktop companion. The plugin stays the main tool: it owns the watchlists and
+quick browsing. The app opens one symbol for deep research: a full chart with
+volume, SMA overlays, pan and zoom, technicals, key stats, and streaming AI
+reports with follow-up questions, saved as notes.
+
+| | this plugin | stock-hq-app |
+|---|---|---|
+| role | main: lists and quick browsing | companion: one symbol in depth |
+| watchlists | multiple lists, gist sync | none; it reads no watchlists |
+| market view | tape, quote table, compact detail view | full candlestick chart, technicals, key stats |
+| AI | quick takes in the detail view | streaming research reports, follow-ups, saved notes |
+
+```mermaid
+flowchart LR
+  P["table row or detail view<br/>o / 在 App 開啟 ↗"] -->|"stock-hq-app open SYM<br/>or xdg-open stockhq://symbol/SYM"| A{"app running?"}
+  A -->|no| N["launch the app on that symbol"]
+  A -->|yes| T["running window opens or switches to its tab and asks for focus"]
+```
+
+- Press `o` on a table row or in the detail view, or click **在 App 開啟 ↗**, to open that symbol in the app. The bar panel then closes.
+- The plugin runs `stock-hq-app open <SYM>` when the binary is on `PATH` or at `~/.local/bin/stock-hq-app`. Otherwise it uses `xdg-open stockhq://symbol/<SYM>` if a `x-scheme-handler/stockhq` handler is registered.
+- The link and the `o` key appear only when the app is installed. If neither is found, the plugin works alone: no link, no `o` action, and no message about the app. The plugin checks again each time the panel opens.
+- The symbol is normalized by `Model.normalizeSymbol` first, and the app uses the same rules, so `TW:2330` opens `2330.TW` in both.
+- The app reuses this plugin's `agentCommand` from `~/.config/omarchy/shell.json` for its reports and follows the same Omarchy theme. It keeps its own quote cache and notes and does not touch `watchlists.json` or `cache.json`.
+- On Hyprland, focusing a window on another workspace needs `misc.focus_on_activate`; see the app's README.
+- Turn the link off with the `openInApp` setting: `omarchy bar set io.github.siygle.stock-hq openInApp false --json`.
+
 ## Configure
 
 UI preferences live on the widget's entry in `~/.config/omarchy/shell.json` and

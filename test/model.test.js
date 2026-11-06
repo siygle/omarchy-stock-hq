@@ -755,3 +755,39 @@ test("quoteSummary carries technical notes when present", () => {
   assert.deepEqual(Model.quoteSummary(q).technical, ["AAPL is in an uptrend."])
   assert.equal(Model.quoteSummary(fullQuote()).technical, undefined)
 })
+
+test("appUrl: canonical symbol in a stockhq:// deep link", () => {
+  assert.equal(Model.appUrl("TW:2330"), "stockhq://symbol/2330.TW")
+  assert.equal(Model.appUrl("0700.hk"), "stockhq://symbol/0700.HK")
+  assert.equal(Model.appUrl("  "), "")
+})
+
+test("parseAppProbe: binary path, URL handler, or nothing", () => {
+  assert.deepEqual(Model.parseAppProbe("/home/u/.local/bin/stock-hq-app\nstock-hq-app.desktop\n"),
+    { path: "/home/u/.local/bin/stock-hq-app", handler: "stock-hq-app.desktop", available: true })
+  assert.deepEqual(Model.parseAppProbe("\nstock-hq-app.desktop\n"), { path: "", handler: "stock-hq-app.desktop", available: true })
+  assert.equal(Model.parseAppProbe("\n\n").available, false)
+  assert.equal(Model.parseAppProbe("").available, false)
+  assert.equal(Model.parseAppProbe("stock-hq-app: not found\n").path, "")
+})
+
+test("appLaunchCommand: prefers the binary, falls back to xdg-open, empty when missing", () => {
+  const bin = Model.parseAppProbe("/usr/bin/stock-hq-app\n")
+  assert.equal(Model.appLaunchCommand("tw:2330", bin), "'/usr/bin/stock-hq-app' open '2330.TW'")
+  const url = Model.parseAppProbe("\nstock-hq-app.desktop")
+  assert.equal(Model.appLaunchCommand("HK:0700", url), "xdg-open 'stockhq://symbol/0700.HK'")
+  assert.equal(Model.appLaunchCommand("AAPL", Model.parseAppProbe("")), "")
+  assert.equal(Model.appLaunchCommand("", bin), "")
+  assert.equal(Model.appLaunchCommand("A'B", bin), "'/usr/bin/stock-hq-app' open 'A'\\''B'")
+})
+
+test("app link only when installed and openInApp not false", () => {
+  const yes = Model.parseAppProbe("/usr/bin/stock-hq-app\n")
+  const no = Model.parseAppProbe("\n\n")
+  assert.equal(Model.appLinkEnabled(true, yes), true)
+  assert.equal(Model.appLinkEnabled("true", yes), true)
+  assert.equal(Model.appLinkEnabled(true, no), false)
+  assert.equal(Model.appLinkEnabled(false, yes), false)
+  assert.equal(Model.appLinkEnabled("false", yes), false)
+  assert.equal(Model.appLinkEnabled(true, null), false)
+})

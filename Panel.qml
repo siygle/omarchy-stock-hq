@@ -61,6 +61,9 @@ Panel {
   readonly property string gistId: Model.normalizeGistId(setting("gistId", ""))
   readonly property string gistFile: Model.normalizeGistFile(setting("gistFile", ""))
   readonly property var agentCommand: Model.normalizeAgentCommand(setting("agentCommand", null))
+  readonly property bool openInAppSetting: setting("openInApp", true) !== false && String(setting("openInApp", true)) !== "false"
+  property var appProbe: ({ path: "", handler: "", available: false })
+  readonly property bool appAvailable: Model.appLinkEnabled(openInAppSetting, appProbe)
   readonly property var agentPrompts: Model.normalizeAgentPrompts(setting("agentPrompts", null))
 
   // ---- Quote state. `quotes` keeps the last good result across failures so
@@ -176,7 +179,9 @@ Panel {
     root.controller.hide()
   }
 
-  onOpenedChanged: if (!root.opened) {
+  onOpenedChanged: if (root.opened) {
+    if (root.openInAppSetting) appProbeProc.running = true
+  } else {
     view = "list"
     cursorIndex = -1
     editing = false
@@ -620,6 +625,23 @@ Panel {
     if (next !== activeRange) updateSettings({ chartRange: next })
   }
 
+  // Opens the symbol in stock-hq-app (focuses the running window) and closes the panel.
+  function openInApp(symbol) {
+    // Not installed or turned off: do nothing, show nothing (plugin runs standalone).
+    if (!appAvailable) return false
+    var line = Model.appLaunchCommand(symbol, appProbe)
+    if (line === "") return false
+    if (root.bar && typeof root.bar.run === "function") root.bar.run(line)
+    close()
+    return true
+  }
+
+  function openCursorInApp() {
+    if (view === "detail" && detailSymbol !== "") return openInApp(detailSymbol)
+    if (view === "list" && cursorIndex >= 0 && cursorIndex < tableQuotes.length) return openInApp(tableQuotes[cursorIndex].symbol)
+    return false
+  }
+
   function openQuotePage(symbol) {
     if (root.bar && typeof root.bar.run === "function")
       root.bar.run("xdg-open " + Model.shellQuote(Model.quoteUrl(symbol)))
@@ -693,6 +715,17 @@ Panel {
     interval: 300
     onTriggered: cacheFile.setText(JSON.stringify(root.cachePayload()) + "\n")
   }
+
+  // Is stock-hq-app installed? Re-probed each time the panel opens.
+  Process {
+    id: appProbeProc
+    command: Model.appProbeCommand()
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.appProbe = Model.parseAppProbe(text)
+    }
+  }
+
 
   Process {
     id: storageProc
@@ -834,6 +867,7 @@ Panel {
         else if (dx < 0 && root.view === "detail") root.showList()
       }
       onTabRequested: function(direction) { root.switchPanel(direction) }
+      onTextKey: function(text, modifiers) { if (text === "o") root.openCursorInApp() }
 
       Column {
         id: content
