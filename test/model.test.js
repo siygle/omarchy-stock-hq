@@ -780,3 +780,14 @@ test("appLaunchCommand: prefers the binary, falls back to xdg-open, empty when m
   assert.equal(Model.appLaunchCommand("", bin), "")
   assert.equal(Model.appLaunchCommand("A'B", bin), "'/usr/bin/stock-hq-app' open 'A'\\''B'")
 })
+
+test("app link only when installed and openInApp not false", () => {
+  const yes = Model.parseAppProbe("/usr/bin/stock-hq-app\n")
+  const no = Model.parseAppProbe("\n\n")
+  assert.equal(Model.appLinkEnabled(true, yes), true)
+  assert.equal(Model.appLinkEnabled("true", yes), true)
+  assert.equal(Model.appLinkEnabled(true, no), false)
+  assert.equal(Model.appLinkEnabled(false, yes), false)
+  assert.equal(Model.appLinkEnabled("false", yes), false)
+  assert.equal(Model.appLinkEnabled(true, null), false)
+})

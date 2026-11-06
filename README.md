@@ -180,7 +180,7 @@ flowchart LR
 
 - Press `o` on a table row or in the detail view, or click **在 App 開啟 ↗**, to open that symbol in the app. The bar panel then closes.
 - The plugin runs `stock-hq-app open <SYM>` when the binary is on `PATH` or at `~/.local/bin/stock-hq-app`. Otherwise it uses `xdg-open stockhq://symbol/<SYM>` if a `x-scheme-handler/stockhq` handler is registered.
-- If neither is found, the link reads "未安裝 stock-hq-app" and does nothing. The plugin checks again each time the panel opens.
+- The link and the `o` key appear only when the app is installed. If neither is found, the plugin works alone: no link, no `o` action, and no message about the app. The plugin checks again each time the panel opens.
 - The symbol is normalized by `Model.normalizeSymbol` first, and the app uses the same rules, so `TW:2330` opens `2330.TW` in both.
 - The app reuses this plugin's `agentCommand` from `~/.config/omarchy/shell.json` for its reports and follows the same Omarchy theme. It keeps its own quote cache and notes and does not touch `watchlists.json` or `cache.json`.
 - On Hyprland, focusing a window on another workspace needs `misc.focus_on_activate`; see the app's README.

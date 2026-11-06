@@ -63,7 +63,7 @@ Panel {
   readonly property var agentCommand: Model.normalizeAgentCommand(setting("agentCommand", null))
   readonly property bool openInAppSetting: setting("openInApp", true) !== false && String(setting("openInApp", true)) !== "false"
   property var appProbe: ({ path: "", handler: "", available: false })
-  readonly property bool appAvailable: openInAppSetting && appProbe.available
+  readonly property bool appAvailable: Model.appLinkEnabled(openInAppSetting, appProbe)
   readonly property var agentPrompts: Model.normalizeAgentPrompts(setting("agentPrompts", null))
 
   // ---- Quote state. `quotes` keeps the last good result across failures so
@@ -627,11 +627,10 @@ Panel {
 
   // Opens the symbol in stock-hq-app (focuses the running window) and closes the panel.
   function openInApp(symbol) {
+    // Not installed or turned off: do nothing, show nothing (plugin runs standalone).
+    if (!appAvailable) return false
     var line = Model.appLaunchCommand(symbol, appProbe)
-    if (line === "" || !openInAppSetting) {
-      if (openInAppSetting) appProbeProc.running = true
-      return false
-    }
+    if (line === "") return false
     if (root.bar && typeof root.bar.run === "function") root.bar.run(line)
     close()
     return true

@@ -215,6 +215,12 @@ function appProbeCommand() {
   return ["sh", "-c", APP_PROBE_SCRIPT]
 }
 
+// The companion link (button, `o` key) exists only when the app is installed
+// and the openInApp setting is not false. Otherwise nothing app-related is shown.
+function appLinkEnabled(setting, probe) {
+  return setting !== false && String(setting) !== "false" && !!(probe && probe.available)
+}
+
 // Shell line for bar.run(): binary if known, else the URL handler.
 function appLaunchCommand(symbol, probe) {
   var sym = normalizeSymbol(symbol)
@@ -1371,6 +1377,7 @@ if (typeof module !== "undefined") {
     appUrl: appUrl,
     parseAppProbe: parseAppProbe,
     appProbeCommand: appProbeCommand,
+    appLinkEnabled: appLinkEnabled,
     appLaunchCommand: appLaunchCommand,
     rangePosition: rangePosition,
     gapPct: gapPct,

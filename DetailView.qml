@@ -327,13 +327,13 @@ Column {
     }
 
     Text {
-      visible: detail.stocks.openInAppSetting
-      text: detail.stocks.appAvailable ? "在 App 開啟 ↗  (o)" : "在 App 開啟：未安裝 stock-hq-app"
-      color: detail.stocks.appAvailable && appMouse.containsMouse ? detail.stocks.barForeground : detail.stocks.mutedForeground
-      opacity: detail.stocks.appAvailable ? 1 : 0.6
+      // Only shown when stock-hq-app is installed and openInApp is on; otherwise the plugin stays standalone.
+      visible: detail.stocks.appAvailable
+      text: "在 App 開啟 ↗  (o)"
+      color: appMouse.containsMouse ? detail.stocks.barForeground : detail.stocks.mutedForeground
       font.family: detail.stocks.fontFamily
       font.pixelSize: Style.font.caption
-      font.underline: detail.stocks.appAvailable && appMouse.containsMouse
+      font.underline: appMouse.containsMouse
 
       MouseArea {
         id: appMouse
