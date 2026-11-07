@@ -98,7 +98,7 @@ Panel {
   property var ratesRequested: []
   property int ratesRetries: 0
 
-  readonly property string userAgent: "Mozilla/5.0 (X11; Linux x86_64) omarchy-stock-hq/0.3.1"
+  readonly property string userAgent: "Mozilla/5.0 (X11; Linux x86_64) omarchy-stock-hq/0.4.0"
   readonly property bool loading: quotes.length === 0 && fetchError === ""
   // One row per watchlist symbol, cached rows included ("No cached data" until fetched).
   readonly property var quoteRows: Model.quoteRowsForSymbols(quotes, symbols, "No cached data")
