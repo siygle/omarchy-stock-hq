@@ -26,6 +26,9 @@ Rectangle {
   Text {
     id: chipText
     anchors.centerIn: parent
+    // Watchlist names and other chip labels are data, not HTML. AutoText
+    // would fetch an <img> embedded in an imported or gist name.
+    textFormat: Text.PlainText
     text: chip.text
     color: chip.selected ? chip.foreground : (chip.stocks ? chip.stocks.mutedForeground : chip.foreground)
     font.family: chip.stocks ? chip.stocks.fontFamily : Style.font.family

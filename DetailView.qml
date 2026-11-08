@@ -100,6 +100,7 @@ Column {
 
       Text {
         width: parent.width
+        textFormat: Text.PlainText
         text: detail.quote ? (detail.quote.name || detail.quote.symbol) : ""
         elide: Text.ElideRight
         color: detail.stocks.barForeground
@@ -109,6 +110,7 @@ Column {
       }
       Text {
         width: parent.width
+        textFormat: Text.PlainText
         text: detail.quote
           ? [detail.quote.symbol, detail.quote.exchange, detail.stocks.currencyLabel(detail.quote)].filter(function(p) { return !!p }).join(" · ")
           : ""

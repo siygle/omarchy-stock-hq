@@ -100,6 +100,7 @@ Column {
 
   component Cell: Text {
     property string column: ""
+    textFormat: Text.PlainText
     width: table.w[column] || 0
     elide: Text.ElideRight
     color: table.stocks.barForeground
@@ -274,6 +275,7 @@ Column {
 
       Text {
         width: parent.width
+        textFormat: Text.PlainText
         text: table.stocks.fileDialogMessage !== "" ? table.stocks.fileDialogMessage : table.stocks.watchlistsPath
         elide: Text.ElideMiddle
         color: table.stocks.mutedForeground
@@ -748,6 +750,7 @@ Column {
 
     Text {
       id: footerText
+      textFormat: Text.PlainText
       anchors.left: parent.left
       anchors.leftMargin: Style.space(8)
       anchors.right: syncRow.left

@@ -125,6 +125,7 @@ BarWidget {
 
         Text {
           text: modelData.text
+          textFormat: Text.PlainText
           color: modelData.down ? root.downColor : (modelData.up ? root.upColor : button.foreground)
           font.family: button.fontFamily
           font.pixelSize: button.fontSize

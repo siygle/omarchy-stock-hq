@@ -45,6 +45,33 @@ test("panel loads each page's text fields only while that page is open", () => {
   assert.ok(panel.slice(detailLoader, detailLoader + 400).includes("sourceComponent: detailPage"))
 })
 
+test("imported and gist list names stay literal, including markup and CJK", () => {
+  const name = '台積電 <img src="http://127.0.0.1/secret.png" alt="x"> 觀察 A&B'
+  const imported = Model.parseWatchlistsDefinition(JSON.stringify({
+    version: 1,
+    watchlists: [{ name: name, symbols: ["tw2330"] }]
+  }))
+  assert.equal(imported.watchlists[0].name, name)
+  assert.deepEqual(imported.watchlists[0].symbols, ["2330.TW"])
+  const synced = Model.parseWatchlistsDefinition(Model.serializeWatchlists(imported.watchlists))
+  assert.equal(synced.watchlists[0].name, name)
+  const symbolsOnly = Model.parseWatchlistsDefinition(JSON.stringify({
+    name: name,
+    symbols: ["2330.TW"]
+  }))
+  assert.equal(symbolsOnly.watchlists[0].name, name)
+})
+
+test("external labels are plain text, not AutoText", () => {
+  const chip = fs.readFileSync(path.join(root, "Chip.qml"), "utf8")
+  const bar = fs.readFileSync(path.join(root, "BarWidget.qml"), "utf8")
+  assert.match(chip, /textFormat:\s*Text\.PlainText/)
+  assert.match(table, /component Cell: Text \{[^}]*textFormat:\s*Text\.PlainText/)
+  assert.match(detail, /textFormat:\s*Text\.PlainText[\s\S]{0,80}detail\.quote\.name/)
+  assert.match(bar, /textFormat:\s*Text\.PlainText/)
+  assert.match(panel, /active:\s*Model\.listPageLive\(root\.opened,\s*root\.view\)/)
+})
+
 test("settings text field is created only while its box is open", () => {
   assert.equal(table.match(/TextField\s*\{/g).length, 3)
   const gate = table.indexOf("Model.settingsFieldLive(table.stocks.opened, table.stocks.view, table.stocks.settingsOpen)")
