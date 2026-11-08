@@ -1365,6 +1365,28 @@ function parseAgentFile(text) {
   return { prompt: String(meta.prompt || ""), at: toNumber(meta.at), output: raw.slice(m[0].length) }
 }
 
+// Controls.TextField is a QQuickTextInput. Its constructor connects
+// QClipboard::dataChanged to q_canPasteChanged (Qt 6.12 qquicktextinput.cpp
+// init, around 2894, and the slot around 3001). That slot calls
+// mimeData()->text() with no focus and no visibility check. On Wayland the
+// offer reader has no aggregate byte cap, so a hidden field is enough for a
+// huge or streaming clipboard to exhaust memory or stall the shell. Destroy
+// the field when its page is not on screen; hiding it or clearing focus does
+// not disconnect the slot.
+function listPageLive(opened, view) {
+  return opened === true && view === "list"
+}
+
+function detailPageLive(opened, view) {
+  return opened === true && view === "detail"
+}
+
+// The refresh-interval field sits in the settings box, which is hidden while
+// the quote table itself is showing. It is live only together with that box.
+function settingsFieldLive(opened, view, settingsOpen) {
+  return listPageLive(opened, view) && settingsOpen === true
+}
+
 function formatElapsed(seconds) {
   var s = Math.max(0, Math.floor(toNumber(seconds) || 0))
   var m = Math.floor(s / 60)
@@ -1418,6 +1440,9 @@ if (typeof module !== "undefined") {
     agentFileName: agentFileName,
     agentFileText: agentFileText,
     parseAgentFile: parseAgentFile,
+    listPageLive: listPageLive,
+    detailPageLive: detailPageLive,
+    settingsFieldLive: settingsFieldLive,
     formatElapsed: formatElapsed,
     DEFAULT_SYMBOLS: DEFAULT_SYMBOLS,
     ASIA_MARKET_SUFFIXES: ASIA_MARKET_SUFFIXES,

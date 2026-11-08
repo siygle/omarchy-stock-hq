@@ -225,20 +225,15 @@ Column {
           font.family: table.stocks.fontFamily
           font.pixelSize: Style.font.caption
         }
-        TextField {
-          id: refreshField
+        // Not created while the settings box is hidden. The box's visible
+        // flag would still construct this TextField.
+        Loader {
+          id: refreshLoader
+          active: Model.settingsFieldLive(table.stocks.opened, table.stocks.view, table.stocks.settingsOpen)
+          visible: active
           width: Style.space(48)
-          text: String(table.stocks.refreshMinutes)
-          foreground: table.stocks.barForeground
-          font.family: table.stocks.fontFamily
-          font.pixelSize: Style.font.caption
-          verticalPadding: Style.space(2)
-          onActiveFocusChanged: table.stocks.editing = activeFocus
-          onAccepted: {
-            table.stocks.saveRefreshMinutes(text)
-            table.stocks.releaseInput()
-          }
-          Keys.onEscapePressed: table.stocks.releaseInput()
+          height: item ? item.implicitHeight : 0
+          sourceComponent: refreshField
         }
         Text {
           anchors.verticalCenter: parent.verticalCenter
@@ -812,6 +807,24 @@ Column {
         active: !syncRow.sync.busy
         onClicked: syncRow.sync.create(table.stocks.watchlists)
       }
+    }
+  }
+
+  Component {
+    id: refreshField
+    TextField {
+      width: refreshLoader.width
+      text: String(table.stocks.refreshMinutes)
+      foreground: table.stocks.barForeground
+      font.family: table.stocks.fontFamily
+      font.pixelSize: Style.font.caption
+      verticalPadding: Style.space(2)
+      onActiveFocusChanged: table.stocks.editing = activeFocus
+      onAccepted: {
+        table.stocks.saveRefreshMinutes(text)
+        table.stocks.releaseInput()
+      }
+      Keys.onEscapePressed: table.stocks.releaseInput()
     }
   }
 }

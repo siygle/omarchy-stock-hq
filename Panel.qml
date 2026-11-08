@@ -189,12 +189,14 @@ Panel {
 
   // ---- Level navigation.
   function showDetail(symbol) {
-    detailScroll.contentY = 0
     var quote = null
     for (var i = 0; i < quoteRows.length; i++) if (quoteRows[i].symbol === symbol) quote = quoteRows[i]
     if (!Model.isValid(quote)) return
     detailSymbol = symbol
+    // Loading the detail page destroys the quote-table text fields. Reset
+    // scroll once that page exists (also onLoaded, for the first creation).
     view = "detail"
+    if (detailLoader.item) detailLoader.item.contentY = 0
     agent.loadCached(symbol)
     ensureChartSeries(false)
   }
@@ -869,37 +871,62 @@ Panel {
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(text, modifiers) { if (text === "o") root.openCursorInApp() }
 
+      // Text fields live inside these pages. Loader.active destroys them when
+      // the panel is closed or the other page is showing. visible: false would
+      // leave the QQuickTextInput, and its clipboard slot, in the shell.
+      Component {
+        id: quoteTablePage
+        QuoteTable {
+          width: tableLoader.width
+          stocks: root
+          maxHeight: root.maxContentHeight
+        }
+      }
+
+      Component {
+        id: detailPage
+        Flickable {
+          width: detailLoader.width
+          height: Math.min(detailColumn.implicitHeight, root.maxContentHeight)
+          contentWidth: width
+          contentHeight: detailColumn.implicitHeight
+          clip: true
+          interactive: contentHeight > height
+          boundsBehavior: Flickable.StopAtBounds
+          ScrollBar.vertical: ScrollBar { policy: interactive ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff }
+
+          DetailView {
+            id: detailColumn
+            width: parent.width - (parent.interactive ? Style.space(10) : 0)
+            stocks: root
+          }
+        }
+      }
+
       Column {
         id: content
         width: parent.width
         spacing: 0
 
-        QuoteTable {
+        Loader {
+          id: tableLoader
           width: parent.width
-          visible: root.view === "list"
-          stocks: root
-          maxHeight: root.maxContentHeight
+          active: Model.listPageLive(root.opened, root.view)
+          visible: active
+          height: item ? item.height : 0
+          sourceComponent: quoteTablePage
+          onUnloaded: root.editing = false
         }
 
-        // Level 2 scrolls as a whole once chart, notes, stats and the agent's
-        // answer outgrow the screen.
-        Flickable {
-          id: detailScroll
+        Loader {
+          id: detailLoader
           width: parent.width
-          visible: root.view === "detail"
-          height: Math.min(detailView.implicitHeight, root.maxContentHeight)
-          contentWidth: width
-          contentHeight: detailView.implicitHeight
-          clip: true
-          interactive: contentHeight > height
-          boundsBehavior: Flickable.StopAtBounds
-          ScrollBar.vertical: ScrollBar { policy: detailScroll.interactive ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff }
-
-          DetailView {
-            id: detailView
-            width: detailScroll.width - (detailScroll.interactive ? Style.space(10) : 0)
-            stocks: root
-          }
+          active: Model.detailPageLive(root.opened, root.view)
+          visible: active
+          height: item ? item.height : 0
+          sourceComponent: detailPage
+          onLoaded: if (item) item.contentY = 0
+          onUnloaded: root.editing = false
         }
       }
     }
