@@ -14,6 +14,8 @@ Column {
   // Height budget from the panel; only the rows scroll to stay inside it.
   property real maxHeight: 100000
 
+  Component.onDestruction: if (stocks) stocks.editing = false
+
   spacing: Style.space(6)
 
   readonly property real gap: Style.space(6)

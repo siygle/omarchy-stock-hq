@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import qs.Commons
+import qs.Ui
 import "Model.js" as Model
 
 // Compact appearance page opened from the gear. Text fields exist only while
@@ -10,6 +11,11 @@ Column {
   id: page
 
   property var stocks: null
+
+  // The page Loader destroys this item when the panel closes or another page
+  // is shown. Clear the keyboard grab here; Quickshell 0.3.1's Loader has no
+  // unloaded signal.
+  Component.onDestruction: if (stocks) stocks.editing = false
 
   spacing: Style.space(8)
   width: parent ? parent.width : implicitWidth

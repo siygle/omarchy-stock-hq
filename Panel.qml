@@ -951,6 +951,8 @@ Panel {
           height: Math.min(detailColumn.implicitHeight, root.maxContentHeight)
           contentWidth: width
           contentHeight: detailColumn.implicitHeight
+          Component.onCompleted: contentY = 0
+          Component.onDestruction: root.editing = false
           clip: true
           interactive: contentHeight > height
           boundsBehavior: Flickable.StopAtBounds
@@ -969,14 +971,18 @@ Panel {
         width: parent.width
         spacing: 0
 
+        // Do not bind height to item.height. An explicit Loader height resizes
+        // the loaded Column to that value; before layout that value is 0, so
+        // the quote table, gear and settings page collapse into an empty frame.
+        // With only width set, the Loader follows the item's implicit height,
+        // including error rows when quotes cannot be fetched.
         Loader {
           id: tableLoader
           width: parent.width
           active: Model.listPageLive(root.opened, root.view)
           visible: active
-          height: item ? item.height : 0
           sourceComponent: quoteTablePage
-          onUnloaded: root.editing = false
+          onActiveChanged: if (!active) root.editing = false
         }
 
         Loader {
@@ -984,10 +990,8 @@ Panel {
           width: parent.width
           active: Model.detailPageLive(root.opened, root.view)
           visible: active
-          height: item ? item.height : 0
           sourceComponent: detailPage
-          onLoaded: if (item) item.contentY = 0
-          onUnloaded: root.editing = false
+          onActiveChanged: if (!active) root.editing = false
         }
 
         Loader {
@@ -995,9 +999,8 @@ Panel {
           width: parent.width
           active: Model.settingsPageLive(root.opened, root.view)
           visible: active
-          height: item ? item.height : 0
           sourceComponent: settingsPage
-          onUnloaded: root.editing = false
+          onActiveChanged: if (!active) root.editing = false
         }
       }
 

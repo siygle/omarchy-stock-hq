@@ -163,6 +163,33 @@ TestCase {
     })
   }
 
+  Loader {
+    id: offlineLoader
+    width: 980
+    active: true
+    sourceComponent: Component {
+      QuoteTable {
+        width: offlineLoader.width
+        stocks: offlineStocks
+        maxHeight: 360
+      }
+    }
+  }
+
+  property var offlineStocks: {
+    var s = makeStocks(13)
+    s.tableQuotes = [{ symbol: "AAPL", name: null, price: null, error: "No response", change: null, changePct: null }]
+    s.validCount = 0
+    s.summary = ({ up: 0, down: 0, avgPct: 0 })
+    return s
+  }
+
+  function test_failedQuotesStillShowTheTable() {
+    wait(50)
+    verify(offlineLoader.item !== null)
+    verify(offlineLoader.height > 80, "quote table collapsed to " + offlineLoader.height)
+  }
+
   function test_writeShots() {
     settingsStocks.view = "settings"
     wait(100)
