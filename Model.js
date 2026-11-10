@@ -749,6 +749,97 @@ function parseThemeColor(tomlText, key) {
   return ""
 }
 
+// Palette keys the panel paints. `urgent` is not a colors.toml key; red is.
+var THEME_COLOR_KEYS = ["background", "foreground", "accent", "muted", "green", "red",
+  "selection", "dark_foreground", "bright_foreground", "lighter_background"]
+
+function parseThemePalette(tomlText) {
+  var out = { found: false }
+  for (var i = 0; i < THEME_COLOR_KEYS.length; i++) {
+    var key = THEME_COLOR_KEYS[i]
+    var color = parseThemeColor(tomlText, key)
+    out[key] = color
+    if (color !== "") out.found = true
+  }
+  return out
+}
+
+// Preference: the user-facing current-theme link, then the shell's theme path,
+// then the generated state directory Omarchy actually writes.
+function themeColorPaths(home, shellThemePath) {
+  var homeDir = String(home || "").replace(/\/+$/, "")
+  var paths = []
+  function add(p) {
+    p = String(p || "").replace(/\/+$/, "")
+    if (p === "") return
+    var file = /colors\.toml$/.test(p) ? p : p + "/colors.toml"
+    if (paths.indexOf(file) === -1) paths.push(file)
+  }
+  add(homeDir + "/.config/omarchy/current/theme")
+  add(shellThemePath)
+  add(homeDir + "/.local/state/omarchy/current/theme")
+  return paths
+}
+
+function themeNamePath(colorsPath) {
+  var file = String(colorsPath || "")
+  var dir = file.replace(/\/colors\.toml$/, "")
+  if (dir === file || dir === "") return ""
+  return dir.replace(/\/theme$/, "") + "/theme.name"
+}
+
+// candidates: [{ path, text }] in preference order. The first file that
+// actually contains a palette wins; missing files are skipped.
+function chooseThemeSource(candidates) {
+  var list = candidates || []
+  for (var i = 0; i < list.length; i++) {
+    var item = list[i] || {}
+    var palette = parseThemePalette(item.text)
+    if (palette.found) return { path: String(item.path || ""), palette: palette }
+  }
+  return { path: "", palette: parseThemePalette("") }
+}
+
+var FONT_SIZE_MIN = 11
+var FONT_SIZE_MAX = 14
+var FONT_SIZE_DEFAULT = 13
+
+var FONT_FAMILY_PRESETS = [
+  { id: "", label: "Theme" },
+  { id: "monospace", label: "Mono" },
+  { id: "sans-serif", label: "Sans" },
+  { id: "serif", label: "Serif" }
+]
+
+function normalizeFontFamily(value) {
+  var s = trimString(value)
+  if (s === "" || s.toLowerCase() === "theme") return ""
+  if (s.length > 80) s = s.slice(0, 80)
+  if (/[\u0000-\u001f]/.test(s)) return ""
+  return s
+}
+
+function normalizeFontSize(value) {
+  var n = parseInt(String(value), 10)
+  if (isNaN(n)) return FONT_SIZE_DEFAULT
+  if (n < FONT_SIZE_MIN) return FONT_SIZE_MIN
+  if (n > FONT_SIZE_MAX) return FONT_SIZE_MAX
+  return n
+}
+
+// Sizes derived from the chosen body size so caption/title stay in proportion
+// and still fit the fixed column grid (11–14).
+function fontRoles(size) {
+  var s = normalizeFontSize(size)
+  return {
+    caption: Math.max(10, s - 2),
+    bodySmall: Math.max(10, s - 1),
+    body: s,
+    subtitle: s + 1,
+    display: s + 4
+  }
+}
+
 function formatVolume(value) {
   var n = toNumber(value)
   if (n === null) return ""
@@ -1381,10 +1472,14 @@ function detailPageLive(opened, view) {
   return opened === true && view === "detail"
 }
 
-// The refresh-interval field sits in the settings box, which is hidden while
-// the quote table itself is showing. It is live only together with that box.
+function settingsPageLive(opened, view) {
+  return opened === true && view === "settings"
+}
+
+// The refresh field lives only on the settings page, so closing that page
+// destroys the TextField instead of hiding it.
 function settingsFieldLive(opened, view, settingsOpen) {
-  return listPageLive(opened, view) && settingsOpen === true
+  return settingsPageLive(opened, view)
 }
 
 function formatElapsed(seconds) {
@@ -1442,7 +1537,20 @@ if (typeof module !== "undefined") {
     parseAgentFile: parseAgentFile,
     listPageLive: listPageLive,
     detailPageLive: detailPageLive,
+    settingsPageLive: settingsPageLive,
     settingsFieldLive: settingsFieldLive,
+    THEME_COLOR_KEYS: THEME_COLOR_KEYS,
+    parseThemePalette: parseThemePalette,
+    themeColorPaths: themeColorPaths,
+    themeNamePath: themeNamePath,
+    chooseThemeSource: chooseThemeSource,
+    FONT_SIZE_MIN: FONT_SIZE_MIN,
+    FONT_SIZE_MAX: FONT_SIZE_MAX,
+    FONT_SIZE_DEFAULT: FONT_SIZE_DEFAULT,
+    FONT_FAMILY_PRESETS: FONT_FAMILY_PRESETS,
+    normalizeFontFamily: normalizeFontFamily,
+    normalizeFontSize: normalizeFontSize,
+    fontRoles: fontRoles,
     formatElapsed: formatElapsed,
     DEFAULT_SYMBOLS: DEFAULT_SYMBOLS,
     ASIA_MARKET_SUFFIXES: ASIA_MARKET_SUFFIXES,

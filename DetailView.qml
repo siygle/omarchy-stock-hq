@@ -78,11 +78,11 @@ Column {
       text: detail.stocks.lastUpdated ? "Updated " + Qt.formatTime(detail.stocks.lastUpdated, "HH:mm") : ""
       color: detail.stocks.mutedForeground
       font.family: detail.stocks.fontFamily
-      font.pixelSize: Style.font.caption
+      font.pixelSize: detail.stocks.fonts.caption
     }
   }
 
-  PanelSeparator { foreground: detail.stocks.barForeground }
+  PanelSeparator { foreground: detail.stocks.textColor }
 
   // ---- Name and price.
   Item {
@@ -103,9 +103,9 @@ Column {
         textFormat: Text.PlainText
         text: detail.quote ? (detail.quote.name || detail.quote.symbol) : ""
         elide: Text.ElideRight
-        color: detail.stocks.barForeground
+        color: detail.stocks.textColor
         font.family: detail.stocks.fontFamily
-        font.pixelSize: Style.font.subtitle
+        font.pixelSize: detail.stocks.fonts.subtitle
         font.bold: true
       }
       Text {
@@ -117,7 +117,7 @@ Column {
         elide: Text.ElideRight
         color: detail.stocks.mutedForeground
         font.family: detail.stocks.fontFamily
-        font.pixelSize: Style.font.caption
+        font.pixelSize: detail.stocks.fonts.caption
       }
     }
 
@@ -131,9 +131,9 @@ Column {
       Text {
         anchors.right: parent.right
         text: detail.quote ? Model.formatPrice(detail.quote.price) : ""
-        color: detail.stocks.barForeground
+        color: detail.stocks.textColor
         font.family: detail.stocks.fontFamily
-        font.pixelSize: Style.font.display
+        font.pixelSize: detail.stocks.fonts.display
         font.bold: true
       }
       Text {
@@ -141,7 +141,7 @@ Column {
         text: detail.quote ? Model.formatChange(detail.quote) : ""
         color: detail.stocks.trendColor(detail.quote)
         font.family: detail.stocks.fontFamily
-        font.pixelSize: Style.font.body
+        font.pixelSize: detail.stocks.fonts.body
       }
     }
   }
@@ -176,7 +176,7 @@ Column {
       text: detail.bounds ? Model.formatPrice(detail.bounds.max) : ""
       color: detail.stocks.mutedForeground
       font.family: detail.stocks.fontFamily
-      font.pixelSize: Style.font.caption
+      font.pixelSize: detail.stocks.fonts.caption
     }
     Text {
       anchors.bottom: parent.bottom
@@ -185,7 +185,7 @@ Column {
       text: detail.bounds ? Model.formatPrice(detail.bounds.min) : ""
       color: detail.stocks.mutedForeground
       font.family: detail.stocks.fontFamily
-      font.pixelSize: Style.font.caption
+      font.pixelSize: detail.stocks.fonts.caption
     }
     Text {
       anchors.centerIn: parent
@@ -193,7 +193,7 @@ Column {
       text: detail.stocks.chartLoading ? "Loading chart…" : "No chart data"
       color: detail.stocks.mutedForeground
       font.family: detail.stocks.fontFamily
-      font.pixelSize: Style.font.bodySmall
+      font.pixelSize: detail.stocks.fonts.bodySmall
       font.italic: true
     }
   }
@@ -210,7 +210,7 @@ Column {
       text: detail.series.length ? detail.stocks.formatStamp(detail.series[0].t, detail.stocks.activeRange) : ""
       color: detail.stocks.mutedForeground
       font.family: detail.stocks.fontFamily
-      font.pixelSize: Style.font.caption
+      font.pixelSize: detail.stocks.fonts.caption
     }
     Text {
       anchors.right: parent.right
@@ -218,7 +218,7 @@ Column {
       text: detail.series.length ? detail.stocks.formatStamp(detail.series[detail.series.length - 1].t, detail.stocks.activeRange) : ""
       color: detail.stocks.mutedForeground
       font.family: detail.stocks.fontFamily
-      font.pixelSize: Style.font.caption
+      font.pixelSize: detail.stocks.fonts.caption
     }
   }
 
@@ -230,9 +230,9 @@ Column {
     Text {
       leftPadding: Style.space(8)
       text: "Technical analysis"
-      color: detail.stocks.barForeground
+      color: detail.stocks.textColor
       font.family: detail.stocks.fontFamily
-      font.pixelSize: Style.font.body
+      font.pixelSize: detail.stocks.fonts.body
       font.bold: true
     }
 
@@ -248,7 +248,7 @@ Column {
         wrapMode: Text.WordWrap
         color: detail.stocks.mutedForeground
         font.family: detail.stocks.fontFamily
-        font.pixelSize: Style.font.caption
+        font.pixelSize: detail.stocks.fonts.caption
       }
     }
 
@@ -258,7 +258,7 @@ Column {
       text: "Dotted line: SMA20 · green/red dashed: recent support/resistance"
       color: detail.stocks.mutedForeground
       font.family: detail.stocks.fontFamily
-      font.pixelSize: Style.font.caption
+      font.pixelSize: detail.stocks.fonts.caption
       font.italic: true
     }
   }
@@ -301,9 +301,9 @@ Column {
         width: isLabel ? detail.statLabelWidth : detail.statValueWidth
         text: entry ? (isLabel ? entry[0] : (entry[1] || "—")) : ""
         elide: Text.ElideRight
-        color: isLabel ? detail.stocks.mutedForeground : detail.stocks.barForeground
+        color: isLabel ? detail.stocks.mutedForeground : detail.stocks.textColor
         font.family: detail.stocks.fontFamily
-        font.pixelSize: isLabel ? Style.font.caption : Style.font.bodySmall
+        font.pixelSize: isLabel ? detail.stocks.fonts.caption : detail.stocks.fonts.bodySmall
       }
     }
   }
@@ -314,9 +314,9 @@ Column {
     Text {
       leftPadding: Style.space(8)
       text: "Open on Yahoo Finance ↗"
-      color: linkMouse.containsMouse ? detail.stocks.barForeground : detail.stocks.mutedForeground
+      color: linkMouse.containsMouse ? detail.stocks.textColor : detail.stocks.mutedForeground
       font.family: detail.stocks.fontFamily
-      font.pixelSize: Style.font.caption
+      font.pixelSize: detail.stocks.fonts.caption
       font.underline: linkMouse.containsMouse
 
       MouseArea {
@@ -332,9 +332,9 @@ Column {
       // Only shown when stock-hq-app is installed and openInApp is on; otherwise the plugin stays standalone.
       visible: detail.stocks.appAvailable
       text: "在 App 開啟 ↗  (o)"
-      color: appMouse.containsMouse ? detail.stocks.barForeground : detail.stocks.mutedForeground
+      color: appMouse.containsMouse ? detail.stocks.textColor : detail.stocks.mutedForeground
       font.family: detail.stocks.fontFamily
-      font.pixelSize: Style.font.caption
+      font.pixelSize: detail.stocks.fonts.caption
       font.underline: appMouse.containsMouse
 
       MouseArea {
@@ -348,7 +348,7 @@ Column {
     }
   }
 
-  PanelSeparator { foreground: detail.stocks.barForeground }
+  PanelSeparator { foreground: detail.stocks.textColor }
 
   // ---- Agent: presets, custom prompt, status, rendered answer.
   Flow {
@@ -359,9 +359,9 @@ Column {
     Text {
       rightPadding: Style.space(6)
       text: "Agent"
-      color: detail.stocks.barForeground
+      color: detail.stocks.textColor
       font.family: detail.stocks.fontFamily
-      font.pixelSize: Style.font.body
+      font.pixelSize: detail.stocks.fonts.body
       font.bold: true
     }
 
@@ -391,9 +391,9 @@ Column {
       anchors.rightMargin: Style.space(8)
       enabled: !detail.runner.running
       placeholderText: "Custom prompt — {symbol} {name} {price} {changePct} {quote} … ⏎ to run"
-      foreground: detail.stocks.barForeground
+      foreground: detail.stocks.textColor
       font.family: detail.stocks.fontFamily
-      font.pixelSize: Style.font.bodySmall
+      font.pixelSize: detail.stocks.fonts.bodySmall
       verticalPadding: Style.spacing.controlPaddingY
       onActiveFocusChanged: detail.stocks.editing = activeFocus
       onAccepted: {
@@ -420,7 +420,7 @@ Column {
       elide: Text.ElideRight
       color: detail.result && detail.result.status === "error" ? detail.stocks.urgentForeground : detail.stocks.mutedForeground
       font.family: detail.stocks.fontFamily
-      font.pixelSize: Style.font.caption
+      font.pixelSize: detail.stocks.fonts.caption
     }
 
     Row {
@@ -462,10 +462,10 @@ Column {
       text: detail.result ? String(detail.result.output || "") : ""
       textFormat: Text.MarkdownText
       wrapMode: Text.Wrap
-      color: detail.stocks.barForeground
+      color: detail.stocks.textColor
       linkColor: Color.accent
       font.family: detail.stocks.fontFamily
-      font.pixelSize: Style.font.bodySmall
+      font.pixelSize: detail.stocks.fonts.bodySmall
       onLinkActivated: function(link) {
         if (detail.stocks.bar && typeof detail.stocks.bar.run === "function")
           detail.stocks.bar.run("xdg-open " + Model.shellQuote(link))

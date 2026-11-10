@@ -75,7 +75,7 @@ omarchy bar move io.github.siygle.stock-hq --section right
 | 總表 | 滑過一列，`✎` / `×` | 改寫或移除代號 |
 | 總表 | `USD ⇄`（或 `Native ⇄`） | 左鍵下一個幣別，右鍵上一個。`Native` 表示各用原幣別 |
 | 總表 | `⟳` | 立即更新報價 |
-| 總表 | `⚙` | 更新間隔，以及清單檔的 `Export` / `Import` / `Open JSON ↗` |
+| 總表 | `⚙` | 打開設定頁：跟隨 Omarchy 主題、字型、字級、更新間隔，以及清單檔的 `Export` / `Import` / `Open JSON ↗`。`Esc` 或 `‹ List` 回到總表 |
 | 總表 | `Create sync gist` / `Sync` / `Open gist ↗` | 見 [Gist 同步](#gist-同步) |
 | 快覽 | `1D` `5D` `1M` `6M` `1Y` | 圖表區間（會記住）。技術面說明跟著這個區間 |
 | 快覽 | AI 預設 chips 或自訂提問 | 對這檔跑 AI 快評。一次只跑一檔，`Cancel` 可中止 |
@@ -175,7 +175,9 @@ omarchy bar set io.github.siygle.stock-hq compact true --json
 |---|---|---|
 | `watchlistsPath` | `~/.local/share/omarchy-stock-hq/watchlists.json` | 自選清單檔 |
 | `symbols` / `watchlists` | `["AAPL","NVDA","SPCX","GOOGL"]` | 只在清單檔還不存在時用來建立 |
-| `refreshMinutes` | `5` | 更新間隔，最少 1。`⚙` 裡也可以改 |
+| `refreshMinutes` | `5` | 更新間隔，最少 1。設定頁裡也可以改 |
+| `fontFamily` | `""`（跟隨主題／工作列） | `Theme`、`monospace`、`sans-serif`、`serif`，或自訂家族名稱 |
+| `fontSize` | `13` | 內文像素，限制在 `11`–`14`，避免表格超出面板 |
 | `tickerWidth` | `180` | 跑馬燈寬度（px），最少 80 |
 | `scrollSpeed` | `20` | 捲動速度（px/s）。`0` 表示不捲動 |
 | `compact` | `false` | 跑馬燈不顯示價格，例如 `AAPL ▲0.42%` |

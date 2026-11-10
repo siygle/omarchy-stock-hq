@@ -10,18 +10,19 @@ Rectangle {
   property string text: ""
   property bool selected: false
   property bool active: true
-  property int fontSize: Style.font.caption
+  property int fontSize: stocks && stocks.fonts ? stocks.fonts.caption : Style.font.caption
   signal clicked(int button)
 
-  readonly property color foreground: chip.stocks ? chip.stocks.barForeground : Color.foreground
+  readonly property color foreground: chip.stocks ? (chip.stocks.textColor || chip.stocks.barForeground) : Color.foreground
+  readonly property color accent: chip.stocks && chip.stocks.accentColor ? chip.stocks.accentColor : Color.accent
 
   width: chipText.implicitWidth + Style.space(12)
   height: chipText.implicitHeight + Style.space(6)
   radius: Style.cornerRadius
   opacity: chip.active ? 1 : 0.45
   color: chip.selected
-    ? Style.selectedFillFor(chip.foreground, Color.accent)
-    : (chipMouse.containsMouse && chip.active ? Style.hoverFillFor(chip.foreground, Color.accent) : "transparent")
+    ? Style.selectedFillFor(chip.foreground, chip.accent)
+    : (chipMouse.containsMouse && chip.active ? Style.hoverFillFor(chip.foreground, chip.accent) : "transparent")
 
   Text {
     id: chipText

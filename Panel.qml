@@ -130,13 +130,39 @@ Panel {
     ? panel.availableCardHeight - panel.verticalContentInset : 100000
 
   // ---- Presentation helpers shared by every row.
-  readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
-  readonly property color mutedForeground: Qt.darker(barForeground, 1.5)
+  readonly property string fontFamilySetting: Model.normalizeFontFamily(setting("fontFamily", ""))
+  readonly property string fontFamily: fontFamilySetting !== "" ? fontFamilySetting : (bar && bar.fontFamily ? bar.fontFamily : "monospace")
+  readonly property int fontSize: Model.normalizeFontSize(setting("fontSize", Model.FONT_SIZE_DEFAULT))
+  readonly property var fonts: Model.fontRoles(fontSize)
   readonly property color urgentForeground: bar ? bar.urgent : Color.urgent
 
-  // Up/down tints: settings override > theme palette (colors.toml) > fallback.
-  property string themeGreen: ""
-  property string themeRed: ""
+  // Theme file texts. Preference is applied in themeChoice.
+  property string configThemeText: ""
+  property string shellThemeText: ""
+  property string stateThemeText: ""
+  property string themeNameText: ""
+  readonly property var themeChoice: Model.chooseThemeSource([
+    { path: homeDir + "/.config/omarchy/current/theme/colors.toml", text: configThemeText },
+    { path: (Color.currentThemePath || "") + "/colors.toml", text: shellThemeText },
+    { path: homeDir + "/.local/state/omarchy/current/theme/colors.toml", text: stateThemeText }
+  ])
+  readonly property var themePalette: themeChoice.palette
+  readonly property bool hasTheme: themePalette.found === true
+  readonly property string themeStatus: {
+    if (!hasTheme) return "Not found — using shell colors"
+    var name = String(themeNameText || "").replace(/^\s+|\s+$/g, "")
+    return name !== "" ? name : "Current Omarchy theme"
+  }
+  readonly property color textColor: hasTheme && themePalette.foreground !== "" ? themePalette.foreground : barForeground
+  readonly property color surfaceColor: hasTheme && themePalette.background !== "" ? themePalette.background : "transparent"
+  readonly property color accentColor: hasTheme && themePalette.accent !== "" ? themePalette.accent : Color.accent
+  readonly property color mutedForeground: {
+    if (hasTheme && themePalette.muted !== "") return themePalette.muted
+    if (hasTheme && themePalette.dark_foreground !== "") return themePalette.dark_foreground
+    return Qt.darker(textColor, 1.5)
+  }
+  readonly property string themeGreen: hasTheme ? (themePalette.green || "") : ""
+  readonly property string themeRed: hasTheme ? (themePalette.red || "") : ""
   readonly property color upColor: upColorSetting !== "" ? upColorSetting : (themeGreen !== "" ? themeGreen : "#5fbf6f")
   readonly property color downColor: downColorSetting !== "" ? downColorSetting : (themeRed !== "" ? themeRed : urgentForeground)
 
@@ -154,19 +180,40 @@ Panel {
   }
 
   FileView {
-    id: themeColors
-    path: Color.currentThemePath + "/colors.toml"
+    id: configThemeFile
+    path: root.homeDir + "/.config/omarchy/current/theme/colors.toml"
     watchChanges: true
     printErrors: false
     onFileChanged: reload()
-    onLoaded: {
-      root.themeGreen = Model.parseThemeColor(text(), "green")
-      root.themeRed = Model.parseThemeColor(text(), "red")
-    }
-    onLoadFailed: {
-      root.themeGreen = ""
-      root.themeRed = ""
-    }
+    onLoaded: root.configThemeText = text()
+    onLoadFailed: root.configThemeText = ""
+  }
+  FileView {
+    id: shellThemeFile
+    path: (Color.currentThemePath || "") + "/colors.toml"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: root.shellThemeText = text()
+    onLoadFailed: root.shellThemeText = ""
+  }
+  FileView {
+    id: stateThemeFile
+    path: root.homeDir + "/.local/state/omarchy/current/theme/colors.toml"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: root.stateThemeText = text()
+    onLoadFailed: root.stateThemeText = ""
+  }
+  FileView {
+    id: themeNameFile
+    path: Model.themeNamePath(root.themeChoice.path)
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: root.themeNameText = text()
+    onLoadFailed: root.themeNameText = ""
   }
 
   function open() {
@@ -327,8 +374,22 @@ Panel {
   }
 
   // ---- Settings box: refresh interval, import / export / open JSON.
+  function showSettings() {
+    view = "settings"
+    releaseInput()
+  }
+
   function toggleSettings() {
-    settingsOpen = !settingsOpen
+    if (view === "settings") showList()
+    else showSettings()
+  }
+
+  function selectFontFamily(family) {
+    updateSettings({ fontFamily: Model.normalizeFontFamily(family) })
+  }
+
+  function selectFontSize(size) {
+    updateSettings({ fontSize: Model.normalizeFontSize(size) })
   }
 
   function saveRefreshMinutes(text) {
@@ -862,7 +923,7 @@ Panel {
       anchors.fill: parent
       blocked: root.editing
       // Esc steps back from a symbol to the table before it closes the panel.
-      onCloseRequested: root.view === "detail" ? root.showList() : root.close()
+      onCloseRequested: (root.view === "detail" || root.view === "settings") ? root.showList() : root.close()
       onActivateRequested: root.activateCursor()
       onMoveRequested: function(dx, dy) {
         if (dy !== 0) root.moveCursor(dy)
@@ -928,6 +989,32 @@ Panel {
           onLoaded: if (item) item.contentY = 0
           onUnloaded: root.editing = false
         }
+
+        Loader {
+          id: settingsLoader
+          width: parent.width
+          active: Model.settingsPageLive(root.opened, root.view)
+          visible: active
+          height: item ? item.height : 0
+          sourceComponent: settingsPage
+          onUnloaded: root.editing = false
+        }
+      }
+
+      Component {
+        id: settingsPage
+        SettingsView {
+          width: settingsLoader.width
+          stocks: root
+        }
+      }
+
+      Rectangle {
+        z: -1
+        width: parent.width
+        height: content.height
+        visible: root.hasTheme && root.surfaceColor != "transparent"
+        color: root.surfaceColor
       }
     }
   }

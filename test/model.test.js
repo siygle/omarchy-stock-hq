@@ -398,6 +398,46 @@ test("normalizeColor: accepts #rgb/#rrggbb/#aarrggbb, rejects junk", () => {
   assert.equal(Model.normalizeColor(null), "")
 })
 
+test("theme palette prefers the config path and ignores empty files", () => {
+  const toml = 'foreground = "#c0caf5"\nbackground = "#1a1b26"\naccent = "#7aa2f7"\ngreen = "#9ece6a"\nred = "#f7768e"\nmuted = "#565f89"\n'
+  const pal = Model.parseThemePalette(toml)
+  assert.equal(pal.found, true)
+  assert.equal(pal.foreground, "#c0caf5")
+  assert.equal(pal.background, "#1a1b26")
+  assert.equal(Model.parseThemePalette("mode = \"dark\"\n").found, false)
+  const home = "/home/u"
+  assert.deepEqual(Model.themeColorPaths(home, home + "/.local/state/omarchy/current/theme"), [
+    home + "/.config/omarchy/current/theme/colors.toml",
+    home + "/.local/state/omarchy/current/theme/colors.toml"
+  ])
+  const chosen = Model.chooseThemeSource([
+    { path: "/cfg/colors.toml", text: "" },
+    { path: "/state/colors.toml", text: toml }
+  ])
+  assert.equal(chosen.path, "/state/colors.toml")
+  assert.equal(chosen.palette.green, "#9ece6a")
+  assert.equal(Model.chooseThemeSource([{ path: "/missing", text: "" }]).palette.found, false)
+  assert.equal(Model.themeNamePath("/home/u/.config/omarchy/current/theme/colors.toml"),
+    "/home/u/.config/omarchy/current/theme.name")
+})
+
+test("font family and size stay inside the panel limits", () => {
+  assert.equal(Model.normalizeFontFamily("  "), "")
+  assert.equal(Model.normalizeFontFamily("Theme"), "")
+  assert.equal(Model.normalizeFontFamily(" Noto Sans "), "Noto Sans")
+  assert.equal(Model.normalizeFontFamily("台積電 Sans"), "台積電 Sans")
+  assert.equal(Model.normalizeFontFamily("bad\nname"), "")
+  assert.equal(Model.normalizeFontSize(null), 13)
+  assert.equal(Model.normalizeFontSize(9), 11)
+  assert.equal(Model.normalizeFontSize(14), 14)
+  assert.equal(Model.normalizeFontSize(30), 14)
+  assert.equal(Model.fontRoles(11).caption, 10)
+  assert.equal(Model.fontRoles(11).body, 11)
+  assert.equal(Model.fontRoles(14).display, 18)
+  assert.equal(Model.FONT_SIZE_MIN, 11)
+  assert.equal(Model.FONT_SIZE_MAX, 14)
+})
+
 test("parseThemeColor: reads a key from Omarchy's colors.toml", () => {
   const toml = 'mode = "dark"\n\naccent = "#7daea3"\n\nred = "#ea6962"\ngreen = "#a9b665"\nbright_green = "#a9b665"\n'
   assert.equal(Model.parseThemeColor(toml, "green"), "#a9b665")
