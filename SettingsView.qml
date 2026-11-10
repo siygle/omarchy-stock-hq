@@ -108,9 +108,26 @@ Column {
         stocks: page.stocks
         text: modelData.label
         fontSize: page.stocks.fonts.caption
-        selected: page.stocks.fontFamilySetting === modelData.id
+        selected: !page.stocks.customFontOpen && page.stocks.fontFamilySetting === modelData.id
         onClicked: page.stocks.selectFontFamily(modelData.id)
       }
+    }
+
+    Chip {
+      stocks: page.stocks
+      text: "Custom"
+      fontSize: page.stocks.fonts.caption
+      selected: page.stocks.customFontOpen
+      onClicked: page.stocks.selectFontFamily("custom")
+    }
+
+    Loader {
+      id: customFontLoader
+      active: Model.customFontFieldLive(page.stocks.opened, page.stocks.view, page.stocks.customFontOpen)
+      visible: active
+      width: active ? Style.space(180) : 0
+      height: item ? item.implicitHeight : 0
+      sourceComponent: customFontField
     }
   }
 
@@ -216,6 +233,26 @@ Column {
     var out = []
     for (var n = Model.FONT_SIZE_MIN; n <= Model.FONT_SIZE_MAX; n++) out.push(n)
     return out
+  }
+
+  Component {
+    id: customFontField
+    TextField {
+      width: customFontLoader.width
+      text: page.stocks.fontFamilySetting
+      placeholderText: "Family name ⏎"
+      foreground: page.stocks.textColor
+      font.family: page.stocks.fontFamily
+      font.pixelSize: page.stocks.fonts.caption
+      verticalPadding: Style.space(2)
+      onTextChanged: if (text.length > 80) text = text.slice(0, 80)
+      onActiveFocusChanged: page.stocks.editing = activeFocus
+      onAccepted: {
+        page.stocks.selectFontFamily(text)
+        page.stocks.releaseInput()
+      }
+      Keys.onEscapePressed: page.stocks.releaseInput()
+    }
   }
 
   Component {

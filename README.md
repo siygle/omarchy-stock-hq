@@ -176,7 +176,7 @@ omarchy bar set io.github.siygle.stock-hq compact true --json
 | `watchlistsPath` | `~/.local/share/omarchy-stock-hq/watchlists.json` | 自選清單檔 |
 | `symbols` / `watchlists` | `["AAPL","NVDA","SPCX","GOOGL"]` | 只在清單檔還不存在時用來建立 |
 | `refreshMinutes` | `5` | 更新間隔，最少 1。設定頁裡也可以改 |
-| `fontFamily` | `""`（跟隨主題／工作列） | `Theme`、`monospace`、`sans-serif`、`serif`，或自訂家族名稱 |
+| `fontFamily` | `""`（跟隨主題／工作列） | `Theme`、`Mono`、`Sans`、`Serif`，或設定頁的 `Custom`（最多 80 字） |
 | `fontSize` | `13` | 內文像素，限制在 `11`–`14`，避免表格超出面板 |
 | `tickerWidth` | `180` | 跑馬燈寬度（px），最少 80 |
 | `scrollSpeed` | `20` | 捲動速度（px/s）。`0` 表示不捲動 |

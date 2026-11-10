@@ -788,6 +788,32 @@ function themeNamePath(colorsPath) {
   return dir.replace(/\/theme$/, "") + "/theme.name"
 }
 
+// Parent of the theme directory. Omarchy replaces `current/theme` wholesale
+// (or swaps a symlink), which drops a watch on colors.toml itself.
+function themeParentPath(colorsPath) {
+  var name = themeNamePath(colorsPath)
+  if (name === "") return ""
+  return name.replace(/\/theme\.name$/, "")
+}
+
+var THEME_REREAD_LIMIT = 8
+
+// What to do when a theme file watch fires. A replaced directory usually
+// arrives as loadFailed or a parent-directory change; keep the last good
+// text and re-open the path until the limit, and only then show Not found.
+function themeWatchReaction(event) {
+  var signal = event && event.signal
+  var retries = event && typeof event.retries === "number" ? event.retries : 0
+  if (signal === "loaded") return { reread: false, clearText: false, resetRetries: true }
+  if (signal === "fileChanged" || signal === "parentChanged")
+    return { reread: retries < THEME_REREAD_LIMIT, clearText: false, resetRetries: false }
+  if (signal === "loadFailed") {
+    if (retries < THEME_REREAD_LIMIT) return { reread: true, clearText: false, resetRetries: false }
+    return { reread: false, clearText: true, resetRetries: false }
+  }
+  return { reread: false, clearText: false, resetRetries: false }
+}
+
 // candidates: [{ path, text }] in preference order. The first file that
 // actually contains a palette wins; missing files are skipped.
 function chooseThemeSource(candidates) {
@@ -817,6 +843,19 @@ function normalizeFontFamily(value) {
   if (s.length > 80) s = s.slice(0, 80)
   if (/[\u0000-\u001f]/.test(s)) return ""
   return s
+}
+
+function fontFamilyIsCustom(value) {
+  var s = normalizeFontFamily(value)
+  if (s === "") return false
+  for (var i = 0; i < FONT_FAMILY_PRESETS.length; i++) {
+    if (FONT_FAMILY_PRESETS[i].id === s) return false
+  }
+  return true
+}
+
+function customFontFieldLive(opened, view, customOpen) {
+  return settingsPageLive(opened, view) && customOpen === true
 }
 
 function normalizeFontSize(value) {
@@ -1543,12 +1582,17 @@ if (typeof module !== "undefined") {
     parseThemePalette: parseThemePalette,
     themeColorPaths: themeColorPaths,
     themeNamePath: themeNamePath,
+    themeParentPath: themeParentPath,
+    THEME_REREAD_LIMIT: THEME_REREAD_LIMIT,
+    themeWatchReaction: themeWatchReaction,
     chooseThemeSource: chooseThemeSource,
     FONT_SIZE_MIN: FONT_SIZE_MIN,
     FONT_SIZE_MAX: FONT_SIZE_MAX,
     FONT_SIZE_DEFAULT: FONT_SIZE_DEFAULT,
     FONT_FAMILY_PRESETS: FONT_FAMILY_PRESETS,
     normalizeFontFamily: normalizeFontFamily,
+    fontFamilyIsCustom: fontFamilyIsCustom,
+    customFontFieldLive: customFontFieldLive,
     normalizeFontSize: normalizeFontSize,
     fontRoles: fontRoles,
     formatElapsed: formatElapsed,

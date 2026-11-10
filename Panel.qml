@@ -141,6 +141,9 @@ Panel {
   property string shellThemeText: ""
   property string stateThemeText: ""
   property string themeNameText: ""
+  property int themeRereads: 0
+  property bool themeRetargeting: false
+  property bool customFontOpen: false
   readonly property var themeChoice: Model.chooseThemeSource([
     { path: homeDir + "/.config/omarchy/current/theme/colors.toml", text: configThemeText },
     { path: (Color.currentThemePath || "") + "/colors.toml", text: shellThemeText },
@@ -179,41 +182,137 @@ Panel {
     return barForeground
   }
 
+  readonly property string configThemePath: homeDir + "/.config/omarchy/current/theme/colors.toml"
+  readonly property string stateThemePath: homeDir + "/.local/state/omarchy/current/theme/colors.toml"
+  readonly property string shellThemePath: (Color.currentThemePath || "") + "/colors.toml"
+  readonly property string stateThemeNamePath: Model.themeNamePath(stateThemePath)
+  readonly property string stateThemeParent: Model.themeParentPath(stateThemePath)
+  readonly property string configThemeParent: Model.themeParentPath(configThemePath)
+
+  // omarchy-theme-set replaces current/theme (or swaps that symlink). A watch
+  // on colors.toml then points at a deleted inode and never sees the new
+  // file, so the page stays on "Not found" even though the path is valid.
+  // Watch the parent directory too, and re-bind every theme path on change
+  // or error. A slow retry keeps running while no palette is loaded.
+  function noteThemeWatch(signal, slot) {
+    if (themeRetargeting) return
+    var reaction = Model.themeWatchReaction({ signal: signal, retries: themeRereads })
+    if (reaction.resetRetries) themeRereads = 0
+    if (reaction.clearText) clearThemeSlot(slot)
+    if (reaction.reread) rereadThemes(false)
+  }
+
+  function clearThemeSlot(slot) {
+    if (slot === "config") configThemeText = ""
+    else if (slot === "shell") shellThemeText = ""
+    else if (slot === "state") stateThemeText = ""
+    else if (slot === "name") themeNameText = ""
+  }
+
+  function rereadThemes(force) {
+    if (themeRetargeting) return
+    if (!force && themeRereads >= Model.THEME_REREAD_LIMIT) return
+    themeRereads = themeRereads + 1
+    themeRetargeting = true
+    configThemeFile.path = ""
+    shellThemeFile.path = ""
+    stateThemeFile.path = ""
+    themeNameFile.path = ""
+    stateThemeDir.path = ""
+    configThemeDir.path = ""
+    themeRetargetTimer.restart()
+  }
+
+  function restoreThemePaths() {
+    configThemeFile.path = configThemePath
+    shellThemeFile.path = shellThemePath
+    stateThemeFile.path = stateThemePath
+    themeNameFile.path = stateThemeNamePath
+    stateThemeDir.path = stateThemeParent
+    configThemeDir.path = configThemeParent
+    configThemeFile.reload()
+    shellThemeFile.reload()
+    stateThemeFile.reload()
+    themeNameFile.reload()
+    themeRetargeting = false
+  }
+
+  Timer {
+    id: themeRetargetTimer
+    interval: 80
+    onTriggered: root.restoreThemePaths()
+  }
+
+  Timer {
+    // Safety net: if every watch was dropped, keep re-opening the paths
+    // until a palette loads. Stops on its own once hasTheme is true.
+    interval: 700
+    repeat: true
+    running: !root.hasTheme
+    onTriggered: root.rereadThemes(true)
+  }
+
   FileView {
-    id: configThemeFile
-    path: root.homeDir + "/.config/omarchy/current/theme/colors.toml"
+    id: configThemeDir
+    path: root.configThemeParent
     watchChanges: true
     printErrors: false
-    onFileChanged: reload()
-    onLoaded: root.configThemeText = text()
-    onLoadFailed: root.configThemeText = ""
+    onFileChanged: root.noteThemeWatch("parentChanged", "dir")
+  }
+  FileView {
+    id: stateThemeDir
+    path: root.stateThemeParent
+    watchChanges: true
+    printErrors: false
+    onFileChanged: root.noteThemeWatch("parentChanged", "dir")
+  }
+  FileView {
+    id: configThemeFile
+    path: root.configThemePath
+    watchChanges: true
+    printErrors: false
+    onFileChanged: root.noteThemeWatch("fileChanged", "config")
+    onLoaded: {
+      root.configThemeText = text()
+      root.noteThemeWatch("loaded", "config")
+    }
+    onLoadFailed: root.noteThemeWatch("loadFailed", "config")
   }
   FileView {
     id: shellThemeFile
-    path: (Color.currentThemePath || "") + "/colors.toml"
+    path: root.shellThemePath
     watchChanges: true
     printErrors: false
-    onFileChanged: reload()
-    onLoaded: root.shellThemeText = text()
-    onLoadFailed: root.shellThemeText = ""
+    onFileChanged: root.noteThemeWatch("fileChanged", "shell")
+    onLoaded: {
+      root.shellThemeText = text()
+      root.noteThemeWatch("loaded", "shell")
+    }
+    onLoadFailed: root.noteThemeWatch("loadFailed", "shell")
   }
   FileView {
     id: stateThemeFile
-    path: root.homeDir + "/.local/state/omarchy/current/theme/colors.toml"
+    path: root.stateThemePath
     watchChanges: true
     printErrors: false
-    onFileChanged: reload()
-    onLoaded: root.stateThemeText = text()
-    onLoadFailed: root.stateThemeText = ""
+    onFileChanged: root.noteThemeWatch("fileChanged", "state")
+    onLoaded: {
+      root.stateThemeText = text()
+      root.noteThemeWatch("loaded", "state")
+    }
+    onLoadFailed: root.noteThemeWatch("loadFailed", "state")
   }
   FileView {
     id: themeNameFile
-    path: Model.themeNamePath(root.themeChoice.path)
+    path: root.stateThemeNamePath
     watchChanges: true
     printErrors: false
-    onFileChanged: reload()
-    onLoaded: root.themeNameText = text()
-    onLoadFailed: root.themeNameText = ""
+    onFileChanged: root.noteThemeWatch("fileChanged", "name")
+    onLoaded: {
+      root.themeNameText = text()
+      root.noteThemeWatch("loaded", "name")
+    }
+    onLoadFailed: root.noteThemeWatch("loadFailed", "name")
   }
 
   function open() {
@@ -385,7 +484,13 @@ Panel {
   }
 
   function selectFontFamily(family) {
-    updateSettings({ fontFamily: Model.normalizeFontFamily(family) })
+    if (family === "custom") {
+      customFontOpen = true
+      return
+    }
+    var clean = Model.normalizeFontFamily(family)
+    customFontOpen = Model.fontFamilyIsCustom(clean)
+    updateSettings({ fontFamily: clean })
   }
 
   function selectFontSize(size) {
@@ -745,7 +850,10 @@ Panel {
   // after this component loads (Loader.onLoaded runs before callLater fires).
   // Storage is made owner-only first (storageProc then loads and fetches), so
   // nothing is read or written before the files are 0600.
-  Component.onCompleted: Qt.callLater(function() { storageProc.running = true })
+  Component.onCompleted: {
+    if (Model.fontFamilyIsCustom(fontFamilySetting)) customFontOpen = true
+    Qt.callLater(function() { storageProc.running = true })
+  }
 
   FileView {
     id: watchlistsFile

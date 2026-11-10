@@ -419,6 +419,52 @@ test("theme palette prefers the config path and ignores empty files", () => {
   assert.equal(Model.chooseThemeSource([{ path: "/missing", text: "" }]).palette.found, false)
   assert.equal(Model.themeNamePath("/home/u/.config/omarchy/current/theme/colors.toml"),
     "/home/u/.config/omarchy/current/theme.name")
+  assert.equal(Model.themeParentPath("/home/u/.local/state/omarchy/current/theme/colors.toml"),
+    "/home/u/.local/state/omarchy/current")
+})
+
+test("theme directory replacement keeps the palette path and asks for a reread", () => {
+  const fs = require("fs")
+  const os = require("os")
+  const path = require("path")
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "omarchy-theme-"))
+  const current = path.join(rootDir, "current")
+  fs.mkdirSync(current)
+  function writeTheme(id, green) {
+    const dir = path.join(rootDir, id)
+    fs.mkdirSync(dir)
+    fs.writeFileSync(path.join(dir, "colors.toml"),
+      'foreground = "#c0caf5"\nbackground = "#1a1b26"\ngreen = "' + green + '"\nred = "#f7768e"\n')
+    return dir
+  }
+  const latte = writeTheme("catppuccin-latte", "#40a02b")
+  const gruvbox = writeTheme("gruvbox", "#98971a")
+  const link = path.join(current, "theme")
+  fs.symlinkSync(latte, link)
+  fs.writeFileSync(path.join(current, "theme.name"), "catppuccin-latte\n")
+  const colorsPath = Model.themeColorPaths(rootDir, "").find((p) => p.indexOf("/.config/") >= 0)
+    ? path.join(current, "theme", "colors.toml")
+    : path.join(current, "theme", "colors.toml")
+  function snapshot() {
+    return Model.chooseThemeSource([{ path: colorsPath, text: fs.readFileSync(colorsPath, "utf8") }])
+  }
+  assert.equal(snapshot().palette.green, "#40a02b")
+  assert.equal(fs.readFileSync(path.join(current, "theme.name"), "utf8").trim(), "catppuccin-latte")
+  // Wholesale replacement: the theme symlink (or directory) is swapped out.
+  fs.unlinkSync(link)
+  fs.symlinkSync(gruvbox, link)
+  fs.writeFileSync(path.join(current, "theme.name"), "gruvbox\n")
+  assert.equal(snapshot().palette.green, "#98971a")
+  assert.equal(snapshot().palette.found, true)
+  // The watch on the old inode fails; do not drop the palette until retries run out.
+  assert.deepEqual(Model.themeWatchReaction({ signal: "loadFailed", retries: 0 }),
+    { reread: true, clearText: false, resetRetries: false })
+  assert.deepEqual(Model.themeWatchReaction({ signal: "parentChanged", retries: 1 }),
+    { reread: true, clearText: false, resetRetries: false })
+  assert.deepEqual(Model.themeWatchReaction({ signal: "loaded", retries: 4 }),
+    { reread: false, clearText: false, resetRetries: true })
+  assert.deepEqual(Model.themeWatchReaction({ signal: "loadFailed", retries: Model.THEME_REREAD_LIMIT }),
+    { reread: false, clearText: true, resetRetries: false })
 })
 
 test("font family and size stay inside the panel limits", () => {
@@ -427,6 +473,13 @@ test("font family and size stay inside the panel limits", () => {
   assert.equal(Model.normalizeFontFamily(" Noto Sans "), "Noto Sans")
   assert.equal(Model.normalizeFontFamily("台積電 Sans"), "台積電 Sans")
   assert.equal(Model.normalizeFontFamily("bad\nname"), "")
+  assert.equal(Model.normalizeFontFamily("x".repeat(90)).length, 80)
+  assert.equal(Model.fontFamilyIsCustom(""), false)
+  assert.equal(Model.fontFamilyIsCustom("serif"), false)
+  assert.equal(Model.fontFamilyIsCustom("Noto Sans"), true)
+  assert.equal(Model.customFontFieldLive(true, "settings", true), true)
+  assert.equal(Model.customFontFieldLive(true, "settings", false), false)
+  assert.equal(Model.customFontFieldLive(true, "list", true), false)
   assert.equal(Model.normalizeFontSize(null), 13)
   assert.equal(Model.normalizeFontSize(9), 11)
   assert.equal(Model.normalizeFontSize(14), 14)
