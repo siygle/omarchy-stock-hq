@@ -518,7 +518,7 @@ Panel {
   }
 
   function requestExportWatchlists() {
-    if (exportSelectProc.running) return
+    if (exportSelectProc.running || exportProc.running) return
     fileDialogMessage = "Choose an export folder…"
     selectedExportPath = ""
     exportSelectProc.running = true
@@ -531,10 +531,15 @@ Panel {
       if (target.charAt(target.length - 1) !== "/") target += "/"
       target += defaultExportFilename()
     }
-    exportFile.path = target
-    exportPrepProc.command = Model.privateStorageCommand([], [target])
-    exportPrepProc.running = true
-    fileDialogMessage = "Exported " + target
+    var payload = JSON.stringify({ version: 1, activeWatchlist: root.activeWatchlist, watchlists: Model.cloneWatchlists(root.watchlists) }, null, 2) + "\n"
+    fileDialogMessage = "Exporting…"
+    exportProc.start(Model.exportCommand(target, payload))
+  }
+
+  function handleExportResult(text) {
+    var result = Model.parseCommandResult(text)
+    var detail = String(result.output || "").split("\n")[0].trim()
+    fileDialogMessage = result.code === 0 && detail !== "" ? "Exported " + detail : "Export failed: " + (detail || "exit " + result.code)
   }
 
   function requestImportWatchlists() {
@@ -880,12 +885,6 @@ Panel {
   }
 
   FileView {
-    id: exportFile
-    atomicWrites: true
-    printErrors: false
-  }
-
-  FileView {
     id: cacheFile
     path: root.cachePath
     atomicWrites: true
@@ -917,10 +916,14 @@ Panel {
     onExited: Qt.callLater(function() { watchlistsFile.reload(); cacheFile.reload(); root.startFetch() })
   }
 
-  // An export holds the same private lists: create the target 0600 first.
-  Process {
-    id: exportPrepProc
-    onExited: exportFile.setText(JSON.stringify({ version: 1, activeWatchlist: root.activeWatchlist, watchlists: Model.cloneWatchlists(root.watchlists) }, null, 2) + "\n")
+  // An export holds the same private lists: Model.exportCommand writes a
+  // verified 0600 file of ours and never reuses a foreign target.
+  StdinProcess {
+    id: exportProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.handleExportResult(text)
+    }
   }
 
   Process {

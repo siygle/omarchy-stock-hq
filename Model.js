@@ -1645,6 +1645,50 @@ function privateStorageCommand(dirs, files) {
   return ["sh", "-c", script, "sh"].concat((dirs || []).map(String), ["--"], (files || []).map(String))
 }
 
+// Watchlist export into a folder the user picks, which may be shared with
+// other local users. The data never passes through FileView/QSaveFile there
+// (QSaveFile copies an existing target's permissions). Instead, in the
+// chosen folder:
+// 1. mktemp creates a new temporary file (O_EXCL, so never someone else's
+//    file or a symlink); chmod 600 and an ownership/mode/regular-file check
+//    must both succeed, otherwise nothing is written (fails closed).
+// 2. The JSON (stdin, exactly $2 bytes) goes into that private file.
+// 3. It is renamed over the target only when the target is missing or is
+//    our own regular file. A target owned by someone else, a symlink or
+//    anything else is left untouched and a fresh unique name is used
+//    (omarchy-stock-hq-DATE-XXXXXX.json).
+// 4. The final file is checked again (ours, regular, 0600).
+// Output follows ghCommand: exit code line, then the final path or the
+// reason it failed. Returns { command, stdin }.
+var EXPORT_SCRIPT = "umask 077\n" +
+    "target=$1\n" +
+    "dir=$(dirname -- \"$target\") && name=$(basename -- \"$target\" .json) && me=$(id -u) || exit 1\n" +
+    "[ -d \"$dir\" ] || { echo \"folder not found: $dir\"; exit 1; }\n" +
+    "mine() { [ ! -L \"$1\" ] && [ -f \"$1\" ] && [ \"$(stat -c %u -- \"$1\")\" = \"$me\" ]; }\n" +
+    "private() { mine \"$1\" && [ \"$(stat -c %a -- \"$1\")\" = 600 ]; }\n" +
+    "tmp=$(mktemp -- \"$dir/.omarchy-stock-hq-export.XXXXXX\") || { echo \"cannot create a file in $dir\"; exit 1; }\n" +
+    "trap 'rm -f -- \"$tmp\"' EXIT\n" +
+    "chmod 600 -- \"$tmp\" || { echo \"cannot make the export private (chmod 600 failed)\"; exit 1; }\n" +
+    "private \"$tmp\" || { echo \"this folder cannot hold a private (0600) file\"; exit 1; }\n" +
+    "head -c \"$2\" > \"$tmp\" && [ \"$(wc -c < \"$tmp\")\" -eq \"$2\" ] || { echo \"write failed\"; exit 1; }\n" +
+    "final=$target\n" +
+    "if [ -e \"$final\" ] || [ -L \"$final\" ]; then\n" +
+    "  mine \"$final\" || final=$(mktemp --suffix=.json -- \"$dir/$name-XXXXXX\") || { echo \"cannot create a new file name\"; exit 1; }\n" +
+    "fi\n" +
+    "mv -fT -- \"$tmp\" \"$final\" || { echo \"cannot write $final\"; exit 1; }\n" +
+    "trap - EXIT\n" +
+    "private \"$final\" || { rm -f -- \"$final\"; echo \"export is not private, removed\"; exit 1; }\n" +
+    "printf '%s' \"$final\""
+
+function exportCommand(target, text) {
+  var body = String(text)
+  return {
+    command: ["sh", "-c", "out=$({ " + EXPORT_SCRIPT + "\n} 2>&1); code=$?; printf '%s\\n%s' \"$code\" \"$out\"", "sh",
+      String(target), String(utf8Length(body))],
+    stdin: body
+  }
+}
+
 // File-system safe name for a symbol's cached analysis ("^GSPC" -> "_GSPC").
 function agentFileName(symbol) {
   return String(symbol || "").replace(/[^A-Za-z0-9.=-]/g, "_") + ".md"
@@ -1752,6 +1796,7 @@ if (typeof module !== "undefined") {
     agentArgv: agentArgv,
     agentCommand: agentCommand,
     privateStorageCommand: privateStorageCommand,
+    exportCommand: exportCommand,
     agentFileName: agentFileName,
     agentFileText: agentFileText,
     parseAgentFile: parseAgentFile,
