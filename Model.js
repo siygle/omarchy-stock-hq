@@ -49,24 +49,71 @@ function normalizeSymbol(value) {
   return symbol
 }
 
-function listFromValue(value) {
-  var list = []
-  if (Array.isArray(value)) {
-    list = value
-  } else if (typeof value === "string") {
-    list = value.split(/[\s,;]+/)
-  } else if (value && typeof value === "object" && typeof value.length === "number") {
-    for (var k = 0; k < value.length; k++) list.push(value[k])
+// ---- Size limits for watchlist data. Imported files, the synced gist and
+//      watchlists.json are untrusted: a definition beyond these limits is
+//      rejected before its lists are iterated or copied. Local edits are
+//      clamped to the same limits (cloneWatchlists), so whatever the panel
+//      saves always loads again.
+var MAX_WATCHLISTS = 50
+var MAX_SYMBOLS_PER_LIST = 200
+var MAX_SYMBOL_LENGTH = 32
+var MAX_WATCHLIST_NAME_LENGTH = 80
+var MAX_DEFINITION_FIELDS = 16      // keys on the root object and on each list
+var MAX_DEFINITION_BYTES = 256 * 1024
+// Other list-valued settings (agent command and prompts, currencies).
+var MAX_SETTINGS_LIST = 256
+
+// A list length is usable only when it is a finite, non-negative integer.
+function validLength(n) {
+  return typeof n === "number" && isFinite(n) && n >= 0 && Math.floor(n) === n
+}
+
+// Settings reach QML as array-like QVariantLists, not real JS arrays. Copy one
+// only when its `length` is a valid length no larger than `max`; anything
+// else (e.g. {"length":1000000000}) is null, decided before any element is
+// read or allocated.
+function boundedList(value, max) {
+  if (!value || typeof value !== "object" || !validLength(value.length) || value.length > max) return null
+  if (Array.isArray(value)) return value
+  var out = []
+  for (var i = 0; i < value.length; i++) out.push(value[i])
+  return out
+}
+
+// Local, already-trusted lists: keep the first `max` entries instead of
+// rejecting the whole list.
+function firstEntries(value, max) {
+  if (!value || typeof value !== "object") return value
+  if (!validLength(value.length)) return []
+  if (value.length <= max) return value
+  var out = []
+  for (var i = 0; i < max; i++) out.push(value[i])
+  return out
+}
+
+function listFromValue(value, max) {
+  var limit = max || MAX_SETTINGS_LIST
+  if (typeof value === "string") {
+    if (value.length > limit * (MAX_SYMBOL_LENGTH + 1)) return []
+    var parts = value.split(/[\s,;]+/)
+    return parts.length > limit + 2 ? [] : parts
   }
-  return list
+  return boundedList(value, limit) || []
+}
+
+// A symbol entry is a string or number of at most MAX_SYMBOL_LENGTH chars.
+function symbolEntry(value) {
+  if (typeof value === "number") value = String(value)
+  if (typeof value !== "string" || value.length > MAX_SYMBOL_LENGTH) return ""
+  return normalizeSymbol(value)
 }
 
 function normalizeSymbols(value, fallback) {
   var defaults = fallback || DEFAULT_SYMBOLS
-  var list = listFromValue(value)
+  var list = listFromValue(value, MAX_SYMBOLS_PER_LIST)
   var out = []
   for (var i = 0; i < list.length; i++) {
-    var symbol = normalizeSymbol(list[i])
+    var symbol = symbolEntry(list[i])
     if (symbol === "" || out.indexOf(symbol) !== -1) continue
     out.push(symbol)
   }
@@ -75,14 +122,18 @@ function normalizeSymbols(value, fallback) {
 
 var DEFAULT_WATCHLIST_NAME = "Main"
 
+function listName(value, index) {
+  var name = trimString(value).slice(0, MAX_WATCHLIST_NAME_LENGTH)
+  return name || ("List " + (index + 1))
+}
+
 function normalizeWatchlists(value, fallbackSymbols) {
   var out = []
-  var list = listFromValue(value)
+  var list = boundedList(value, MAX_WATCHLISTS) || []
   for (var i = 0; i < list.length; i++) {
-    var item = list[i] || {}
-    var name = trimString(item.name || item.label || ("List " + (i + 1)))
+    var item = list[i] && typeof list[i] === "object" ? list[i] : {}
     var symbols = normalizeSymbols(item.symbols, [])
-    if (symbols.length) out.push({ name: name || ("List " + (i + 1)), symbols: symbols })
+    if (symbols.length) out.push({ name: listName(item.name || item.label, i), symbols: symbols })
   }
   if (out.length) return out
   return [{ name: DEFAULT_WATCHLIST_NAME, symbols: normalizeSymbols(fallbackSymbols, DEFAULT_SYMBOLS) }]
@@ -96,10 +147,14 @@ function activeWatchlistIndex(value, watchlists) {
   return n
 }
 
+// Also the single place local edits are clamped to the definition limits.
 function cloneWatchlists(watchlists) {
-  var list = watchlists || []
+  var list = firstEntries(watchlists || [], MAX_WATCHLISTS)
   var out = []
-  for (var i = 0; i < list.length; i++) out.push({ name: String(list[i].name || ("List " + (i + 1))), symbols: normalizeSymbols(list[i].symbols, []) })
+  for (var i = 0; i < list.length; i++) {
+    var item = list[i] || {}
+    out.push({ name: listName(item.name, i), symbols: normalizeSymbols(firstEntries(item.symbols, MAX_SYMBOLS_PER_LIST), []) })
+  }
   return out
 }
 
@@ -902,12 +957,7 @@ function normalizeCurrency(value) {
 
 function normalizeCurrencies(value, fallback) {
   var defaults = fallback || DEFAULT_CURRENCIES
-  var list = []
-  if (Array.isArray(value)) list = value
-  else if (typeof value === "string") list = value.split(/[\s,;]+/)
-  else if (value && typeof value === "object" && typeof value.length === "number") {
-    for (var k = 0; k < value.length; k++) list.push(value[k])
-  }
+  var list = listFromValue(value, MAX_SETTINGS_LIST)
   var out = []
   for (var i = 0; i < list.length; i++) {
     var code = normalizeCurrency(list[i])
@@ -1192,8 +1242,12 @@ function gistUrl(id) {
 // Gist content -> symbol list (possibly empty). Accepts a JSON array, a JSON
 // object with `symbols`, or plain text (one symbol per line or comma/space
 // separated, `#` starts a comment) so editing on the web is forgiving.
+// Returns at most MAX_SYMBOLS_PER_LIST + 1 symbols, so callers can tell an
+// over-long list apart without the parser collecting all of it.
 function parseWatchlist(text) {
-  var raw = trimString(text)
+  var raw = String(text === undefined || text === null ? "" : text)
+  if (raw.length > MAX_DEFINITION_BYTES) return []
+  raw = trimString(raw)
   if (raw === "" || raw === "null") return []
   var list = null
   try {
@@ -1214,50 +1268,114 @@ function parseWatchlist(text) {
     }
   }
   var out = []
-  for (var k = 0; k < list.length; k++) {
-    if (typeof list[k] !== "string" && typeof list[k] !== "number") continue
-    var symbol = normalizeSymbol(list[k])
+  for (var k = 0; k < list.length && out.length <= MAX_SYMBOLS_PER_LIST; k++) {
+    var symbol = symbolEntry(list[k])
     if (symbol === "" || out.indexOf(symbol) !== -1) continue
     out.push(symbol)
   }
   return out
 }
 
+// ---- Strict readers for untrusted definitions. Containers must be real
+//      JSON arrays within the limits above; a value that breaks a limit makes
+//      the reader return null so the whole definition is rejected.
+
+// Stops counting at max + 1, so a huge object costs at most that many steps.
+function withinFieldLimit(obj, max) {
+  var n = 0
+  for (var k in obj) if (Object.prototype.hasOwnProperty.call(obj, k) && ++n > max) return false
+  return true
+}
+
+function definitionSymbols(value) {
+  if (!Array.isArray(value) || value.length > MAX_SYMBOLS_PER_LIST) return null
+  var out = []
+  for (var i = 0; i < value.length; i++) {
+    var v = value[i]
+    if (typeof v === "number") v = String(v)
+    if (typeof v !== "string") continue
+    if (v.length > MAX_SYMBOL_LENGTH) return null
+    var symbol = normalizeSymbol(v)
+    if (symbol !== "" && out.indexOf(symbol) === -1) out.push(symbol)
+  }
+  return out
+}
+
+function definitionName(value, fallback) {
+  if (value === undefined || value === null || value === "") return fallback
+  if (typeof value !== "string" && typeof value !== "number") return null
+  var name = trimString(value)
+  if (name.length > MAX_WATCHLIST_NAME_LENGTH) return null
+  return name || fallback
+}
+
+function definitionLists(value) {
+  if (!Array.isArray(value) || value.length > MAX_WATCHLISTS) return null
+  var out = []
+  for (var i = 0; i < value.length; i++) {
+    var item = value[i]
+    if (!item || typeof item !== "object" || Array.isArray(item) || !withinFieldLimit(item, MAX_DEFINITION_FIELDS)) return null
+    var given = item.name !== undefined && item.name !== null && item.name !== "" ? item.name : item.label
+    var name = definitionName(given, "List " + (i + 1))
+    var symbols = item.symbols === undefined || item.symbols === null ? [] : definitionSymbols(item.symbols)
+    if (name === null || symbols === null) return null
+    if (symbols.length) out.push({ name: name, symbols: symbols })
+  }
+  return out
+}
+
 // A watchlists definition (watchlists.json, an imported file, or the gist)
-// -> { watchlists, activeWatchlist }, or null when it holds no symbols.
+// -> { definition: { watchlists, activeWatchlist } | null, tooLarge }.
+// definition is null when the text holds no symbols or breaks a limit;
+// tooLarge tells the second case apart so callers can say so (and gist sync
+// does not overwrite a remote file it refused to read).
 // Accepts { watchlists: [...] }, { symbols: [...] }, a bare array of lists or
 // of symbols, and plain text (one symbol per line, `#` comments), which
 // becomes a single "Main" list.
-function parseWatchlistsDefinition(text) {
+function readWatchlistsDefinition(text) {
+  var raw = String(text === undefined || text === null ? "" : text)
+  var rejected = { definition: null, tooLarge: true }
+  if (raw.length > MAX_DEFINITION_BYTES || utf8Length(raw) > MAX_DEFINITION_BYTES) return rejected
   var parsed = null
-  try { parsed = JSON.parse(String(text || "")) } catch (e) { parsed = null }
+  try { parsed = JSON.parse(raw) } catch (e) { parsed = null }
   var lists = []
   var active = 0
-  var arr = arrayLike(parsed)
-  if (arr) {
-    var named = false
-    for (var i = 0; i < arr.length; i++) if (arr[i] && typeof arr[i] === "object") named = true
-    lists = named ? normalizeWatchlists(arr, []).filter(function(l) { return l.symbols.length }) : []
-    if (!named) {
-      var plain = normalizeSymbols(arr, [])
-      if (plain.length) lists = [{ name: DEFAULT_WATCHLIST_NAME, symbols: plain }]
+  if (Array.isArray(parsed)) {
+    var named = parsed.length > 0 && parsed[0] !== null && typeof parsed[0] === "object"
+    if (named) {
+      lists = definitionLists(parsed)
+    } else {
+      var plain = definitionSymbols(parsed)
+      lists = plain === null ? null : (plain.length ? [{ name: DEFAULT_WATCHLIST_NAME, symbols: plain }] : [])
     }
   } else if (parsed && typeof parsed === "object") {
-    if (parsed.watchlists) {
-      var given = listFromValue(parsed.watchlists)
-      if (given.length) lists = normalizeWatchlists(given, [])
-    } else if (parsed.symbols) {
-      var syms = normalizeSymbols(parsed.symbols, [])
-      if (syms.length) lists = [{ name: String(parsed.name || DEFAULT_WATCHLIST_NAME), symbols: syms }]
+    if (!withinFieldLimit(parsed, MAX_DEFINITION_FIELDS)) return rejected
+    if (parsed.watchlists !== undefined && parsed.watchlists !== null) {
+      lists = definitionLists(parsed.watchlists)
+    } else if (parsed.symbols !== undefined && parsed.symbols !== null) {
+      var syms = definitionSymbols(parsed.symbols)
+      var name = definitionName(parsed.name, DEFAULT_WATCHLIST_NAME)
+      lists = syms === null || name === null ? null : (syms.length ? [{ name: name, symbols: syms }] : [])
     }
-    active = parsed.activeWatchlist
+    if (typeof parsed.activeWatchlist === "number") active = parsed.activeWatchlist
   } else if (parsed === null) {
-    var fromText = parseWatchlist(text)
+    var fromText = parseWatchlist(raw)
+    if (fromText.length > MAX_SYMBOLS_PER_LIST) return rejected
     if (fromText.length) lists = [{ name: DEFAULT_WATCHLIST_NAME, symbols: fromText }]
   }
-  lists = lists.filter(function(l) { return l.symbols && l.symbols.length })
-  if (!lists.length) return null
-  return { watchlists: lists, activeWatchlist: activeWatchlistIndex(active, lists) }
+  if (lists === null) return rejected
+  if (!lists.length) return { definition: null, tooLarge: false }
+  return { definition: { watchlists: lists, activeWatchlist: activeWatchlistIndex(active, lists) }, tooLarge: false }
+}
+
+function parseWatchlistsDefinition(text) {
+  return readWatchlistsDefinition(text).definition
+}
+
+// Import reads at most one byte past the limit, so an oversized (or endless)
+// file is cut short in the child process and then rejected by the parser.
+function importReadCommand(path) {
+  return ["head", "-c", String(MAX_DEFINITION_BYTES + 1), "--", String(path)]
 }
 
 // Same shape as watchlists.json; the active list is per-machine UI state and
@@ -1281,8 +1399,11 @@ function gistBody(file, watchlists) {
 // and prints the exit code on the first line, so a single stdout collector
 // sees both the result and the reason it failed (no stdout/stderr ordering
 // races). Values reach the script only as positional args.
-function ghCommand(script, args) {
-  return ["sh", "-c", "out=$({ " + script + "; } 2>&1); code=$?; printf '%s\\n%s' \"$code\" \"$out\"", "sh"].concat(args || [])
+// `maxBytes` (optional) caps what reaches the shell: the wrapper's output is
+// cut in the child process, one byte past the limit plus the status line.
+function ghCommand(script, args, maxBytes) {
+  var cap = validLength(maxBytes) && maxBytes > 0 ? " | head -c " + (maxBytes + 1 + 16) : ""
+  return ["sh", "-c", "out=$({ " + script + "; } 2>&1); code=$?; printf '%s\\n%s' \"$code\" \"$out\"" + cap, "sh"].concat(args || [])
 }
 
 // Wrapper stdout -> { code, output }; a missing/garbled status line is code -1.
@@ -1313,7 +1434,7 @@ function commandError(result) {
 
 function gistPullCommand(id, file) {
   return ghCommand("gh api \"gists/$1\" --jq \"$2\"",
-    [normalizeGistId(id), ".files[" + JSON.stringify(normalizeGistFile(file)) + "].content"])
+    [normalizeGistId(id), ".files[" + JSON.stringify(normalizeGistFile(file)) + "].content"], MAX_DEFINITION_BYTES)
 }
 
 // The JSON body (watchlist names and symbols) is written to the Process
@@ -1345,16 +1466,10 @@ var DEFAULT_AGENT_PROMPTS = [
   { name: "News & catalysts", prompt: "Search the news from the last two weeks about {name} ({symbol}) and list upcoming catalysts (earnings date, product events, macro). Markdown bullets with dates and sources." }
 ]
 
-// Settings can reach QML as array-like QVariantLists, not real JS arrays
-// (the same reason normalizeSymbols accepts anything with a length).
+// Settings can reach QML as array-like QVariantLists, not real JS arrays;
+// boundedList copies them only with a small valid length.
 function arrayLike(value) {
-  if (Array.isArray(value)) return value
-  var out = []
-  if (value && typeof value === "object" && typeof value.length === "number") {
-    for (var i = 0; i < value.length; i++) out.push(value[i])
-    return out
-  }
-  return null
+  return boundedList(value, MAX_SETTINGS_LIST)
 }
 
 function normalizeAgentCommand(value) {
@@ -1552,6 +1667,16 @@ if (typeof module !== "undefined") {
     gistUrl: gistUrl,
     parseWatchlist: parseWatchlist,
     parseWatchlistsDefinition: parseWatchlistsDefinition,
+    readWatchlistsDefinition: readWatchlistsDefinition,
+    importReadCommand: importReadCommand,
+    boundedList: boundedList,
+    MAX_WATCHLISTS: MAX_WATCHLISTS,
+    MAX_SYMBOLS_PER_LIST: MAX_SYMBOLS_PER_LIST,
+    MAX_SYMBOL_LENGTH: MAX_SYMBOL_LENGTH,
+    MAX_WATCHLIST_NAME_LENGTH: MAX_WATCHLIST_NAME_LENGTH,
+    MAX_DEFINITION_FIELDS: MAX_DEFINITION_FIELDS,
+    MAX_DEFINITION_BYTES: MAX_DEFINITION_BYTES,
+    MAX_SETTINGS_LIST: MAX_SETTINGS_LIST,
     serializeWatchlists: serializeWatchlists,
     watchlistsKey: watchlistsKey,
     gistBody: gistBody,

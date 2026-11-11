@@ -419,6 +419,7 @@ Panel {
   }
 
   function addWatchlist() {
+    if (watchlists.length >= Model.MAX_WATCHLISTS) return
     var lists = Model.cloneWatchlists(watchlists)
     lists.push({ name: "List " + (lists.length + 1), symbols: ["2330.TW", "0050.TW", "0700.HK", "7203.T"] })
     persistWatchlists(lists, lists.length - 1)
@@ -547,12 +548,18 @@ Panel {
     var source = filePathFromUrl(path)
     if (source === "") return
     selectedImportPath = source
-    importReadProc.command = ["cat", source]
+    importReadProc.command = Model.importReadCommand(source)
     importReadProc.running = true
   }
 
   function importWatchlistsText(text) {
-    var definition = Model.parseWatchlistsDefinition(text)
+    var read = Model.readWatchlistsDefinition(text)
+    var definition = read.definition
+    if (read.tooLarge) {
+      fileDialogMessage = "Import failed: over the limit of " + Model.MAX_WATCHLISTS + " lists, "
+        + Model.MAX_SYMBOLS_PER_LIST + " symbols per list or " + Math.round(Model.MAX_DEFINITION_BYTES / 1024) + " KB"
+      return
+    }
     if (!definition) {
       fileDialogMessage = "Import failed: JSON must contain watchlists or symbols"
       return

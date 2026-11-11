@@ -79,7 +79,15 @@ Item {
   function handlePull(text) {
     var result = Model.parseCommandResult(text)
     if (result.code !== 0) return fail(result)
-    var remote = Model.parseWatchlistsDefinition(result.output)
+    var read = Model.readWatchlistsDefinition(result.output)
+    // Over the size limits: keep both sides as they are rather than
+    // overwriting a remote file that was refused.
+    if (read.tooLarge) {
+      error = "Gist file is over the watchlist limits"
+      status = "error"
+      return
+    }
+    var remote = read.definition
     var localKey = Model.watchlistsKey(watchlists)
     // An empty or missing file: seed it from the local lists.
     if (!remote) {
