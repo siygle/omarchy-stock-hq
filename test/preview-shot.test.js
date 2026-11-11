@@ -6,11 +6,12 @@ const path = require("path")
 const { spawnSync } = require("child_process")
 
 const root = path.join(__dirname, "..")
-const shotDir = "/opt/cursor/artifacts"
+const qmltestrunner = "/usr/lib/qt6/bin/qmltestrunner"
 
-test("offscreen shots of settings and both font sizes", () => {
-  fs.mkdirSync(shotDir, { recursive: true })
+test("offscreen shots of settings and both font sizes", { skip: !fs.existsSync(qmltestrunner) && "qmltestrunner not installed" }, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "stock-hq-shot-"))
+  const shotDir = process.env.STOCKHQ_SHOT_DIR || path.join(dir, "shots")
+  fs.mkdirSync(shotDir, { recursive: true })
   for (const name of ["SettingsView.qml", "QuoteTable.qml", "Chip.qml", "SeriesCanvas.qml", "RangeBar.qml", "Model.js"]) {
     let text = fs.readFileSync(path.join(root, name), "utf8")
     text = text.replace(/^([ \t]+)foreground:/gm, "$1color:")
@@ -19,8 +20,9 @@ test("offscreen shots of settings and both font sizes", () => {
   }
   let shot = fs.readFileSync(path.join(__dirname, "preview-shot.qml"), "utf8")
   shot = shot.replace('import "../Model.js" as Model', 'import "Model.js" as Model')
+  shot = shot.replace('property string shotDir: "/opt/cursor/artifacts"', "property string shotDir: " + JSON.stringify(shotDir))
   fs.writeFileSync(path.join(dir, "preview-shot.qml"), shot)
-  const run = spawnSync("/usr/lib/qt6/bin/qmltestrunner", [
+  const run = spawnSync(qmltestrunner, [
     "-import", path.join(__dirname, "stubs"),
     "-input", path.join(dir, "preview-shot.qml"),
     "-o", "-,txt"
