@@ -211,6 +211,30 @@ function scrollSpeed(value, fallback) {
   return n
 }
 
+// ---- Provider response bounds. A normal chart response is 7-15 KB; these
+//      leave wide headroom while keeping what the shell buffers small.
+var MAX_RESPONSE_BYTES_PER_SYMBOL = 256 * 1024
+var MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+var FETCH_BATCH_SECONDS = 60
+var MAX_SERIES_POINTS = 2000
+var MAX_QUOTE_TEXT_LENGTH = 128
+
+// Byte ceiling for one batch (all symbols of one curl run, newlines included).
+function responseLimit(count) {
+  var n = validLength(count) && count > 0 ? count : 1
+  return Math.min(MAX_RESPONSE_BYTES, n * MAX_RESPONSE_BYTES_PER_SYMBOL)
+}
+
+// True when collected stdout went past `limit` UTF-8 bytes; the batch is then
+// discarded as a whole. Cheap length checks first: a UTF-16 unit is at most
+// 3 UTF-8 bytes.
+function responseTooLarge(text, limit) {
+  var s = String(text || "")
+  if (s.length > limit) return true
+  if (s.length * 3 <= limit) return false
+  return utf8Length(s) > limit
+}
+
 // One curl invocation for every symbol so the shell owns a single child
 // process per refresh. `-w "\n"` terminates each response, so stdout is one
 // JSON document per line in request order. Deliberately no `-f`: a 404 for an
@@ -219,12 +243,30 @@ function scrollSpeed(value, fallback) {
 // Watchlist symbols are user data: they must not show up in any process
 // command line (ps/proc are world-readable). The URLs reach curl as a config
 // file on stdin (`-K -`); argv only carries fixed flags, the user agent and
-// the payload byte length. Returns { command, stdin }.
+// the payload byte length. Returns { command, stdin, limit }.
+//
+// Response bounds, enforced while curl runs rather than after the shell has
+// buffered everything:
+// - `head -c LIMIT+1` after curl passes at most one byte past the batch limit
+//   and then closes the pipe, so curl's next write fails and it stops. This
+//   holds without a Content-Length; `--max-filesize` additionally refuses a
+//   single response that announces more than the per-symbol limit. The
+//   panel discards any output longer than `limit` (responseTooLarge).
+// - `timeout` bounds the whole batch, not just each transfer, and is the
+//   process Quickshell starts: stopping it, or the deadline, signals the
+//   whole process group (sh, head, curl), so no child is left running.
 function curlCommand(symbols, userAgent, range) {
   var config = ""
   for (var i = 0; i < symbols.length; i++) config += "url = " + JSON.stringify(chartUrl(symbols[i], range)) + "\n"
-  return stdinCommand("head -c \"$1\" | curl -sS --max-time 10 -A \"$2\" -w '\\n' -K -",
-    [String(utf8Length(config)), String(userAgent || "omarchy-stock-hq")], config)
+  var limit = responseLimit(symbols.length)
+  var script = "head -c \"$1\" | curl -sS --max-time 10 --max-filesize \"$3\" -A \"$2\" -w '\\n' -K - | head -c \"$4\""
+  return {
+    command: ["timeout", "-k", "2", String(FETCH_BATCH_SECONDS), "sh", "-c", script, "sh",
+      String(utf8Length(config)), String(userAgent || "omarchy-stock-hq"),
+      String(MAX_RESPONSE_BYTES_PER_SYMBOL), String(limit + 1)],
+    stdin: config,
+    limit: limit
+  }
 }
 
 // UTF-8 byte length (QML's JS engine has no TextEncoder/Buffer).
@@ -322,15 +364,27 @@ function emptyQuote(symbol, error) {
 }
 
 function quoteBlock(result) {
-  return result && result.indicators && result.indicators.quote ? result.indicators.quote[0] : null
+  var list = result && result.indicators && result.indicators.quote
+  return Array.isArray(list) && list[0] && typeof list[0] === "object" ? list[0] : null
+}
+
+// A provider column: a real array within MAX_SERIES_POINTS, else none.
+function providerColumn(value) {
+  return Array.isArray(value) && value.length <= MAX_SERIES_POINTS ? value : []
+}
+
+function providerText(value, max) {
+  if (typeof value !== "string" && typeof value !== "number") return ""
+  return String(value).slice(0, max || MAX_QUOTE_TEXT_LENGTH)
 }
 
 // timestamp[] + indicators.quote[0].close[] -> [{t, c}], nulls skipped
 // (Yahoo leaves the in-progress bar and market holidays as null).
+// Columns over MAX_SERIES_POINTS rows are dropped, not copied.
 function parseSeries(result) {
-  var stamps = result && result.timestamp ? result.timestamp : []
+  var stamps = providerColumn(result && result.timestamp)
   var block = quoteBlock(result)
-  var closes = block && block.close ? block.close : []
+  var closes = providerColumn(block && block.close)
   var out = []
   for (var i = 0; i < stamps.length && i < closes.length; i++) {
     var t = toNumber(stamps[i])
@@ -344,13 +398,13 @@ function parseSeries(result) {
 // Full OHLCV candles for technical analysis. Keeps rows where at least close is
 // known; high/low/open/volume may be null on sparse provider responses.
 function parseCandles(result) {
-  var stamps = result && result.timestamp ? result.timestamp : []
+  var stamps = providerColumn(result && result.timestamp)
   var block = quoteBlock(result)
-  var opens = block && block.open ? block.open : []
-  var highs = block && block.high ? block.high : []
-  var lows = block && block.low ? block.low : []
-  var closes = block && block.close ? block.close : []
-  var volumes = block && block.volume ? block.volume : []
+  var opens = providerColumn(block && block.open)
+  var highs = providerColumn(block && block.high)
+  var lows = providerColumn(block && block.low)
+  var closes = providerColumn(block && block.close)
+  var volumes = providerColumn(block && block.volume)
   var out = []
   for (var i = 0; i < stamps.length && i < closes.length; i++) {
     var t = toNumber(stamps[i])
@@ -370,7 +424,7 @@ function parseCandles(result) {
 
 function firstOpen(result) {
   var quoteBlock = result && result.indicators && result.indicators.quote ? result.indicators.quote[0] : null
-  var opens = quoteBlock && quoteBlock.open ? quoteBlock.open : []
+  var opens = providerColumn(quoteBlock && quoteBlock.open)
   for (var i = 0; i < opens.length; i++) {
     var o = toNumber(opens[i])
     if (o !== null) return o
@@ -393,10 +447,10 @@ function parseChartResponse(line) {
   var chart = data && data.chart
   if (!chart) return emptyQuote("", "Bad response")
 
-  var result = chart.result && chart.result[0]
-  if (!result || !result.meta) {
+  var result = Array.isArray(chart.result) ? chart.result[0] : null
+  if (!result || typeof result !== "object" || !result.meta || typeof result.meta !== "object") {
     var code = chart.error && (chart.error.code || chart.error.description)
-    return emptyQuote("", code ? String(code) : "No data")
+    return emptyQuote("", code ? providerText(code) || "No data" : "No data")
   }
 
   var meta = result.meta
@@ -409,10 +463,10 @@ function parseChartResponse(line) {
   var change = price !== null && prev !== null ? price - prev : null
   var changePct = change !== null && prev ? (change / prev) * 100 : null
 
-  var quote = emptyQuote(meta.symbol, price === null ? "No data" : "")
-  quote.name = trimString(meta.shortName || meta.longName || meta.symbol)
-  quote.currency = String(meta.currency || "")
-  quote.exchange = String(meta.fullExchangeName || meta.exchangeName || "")
+  var quote = emptyQuote(providerText(meta.symbol, MAX_SYMBOL_LENGTH), price === null ? "No data" : "")
+  quote.name = trimString(providerText(meta.shortName || meta.longName || meta.symbol))
+  quote.currency = providerText(meta.currency, 8)
+  quote.exchange = providerText(meta.fullExchangeName || meta.exchangeName)
   quote.price = price
   quote.prevClose = prev
   quote.change = change
@@ -445,6 +499,8 @@ function parseSeriesLines(text, symbols) {
 function parseQuoteLines(text, symbols) {
   var lines = String(text || "").split("\n")
   if (lines.length && lines[lines.length - 1] === "") lines.pop()
+  // curl writes one line per URL; anything past that is not parsed.
+  if (lines.length > symbols.length) lines = lines.slice(0, symbols.length + 1)
 
   var positional = lines.length === symbols.length
   var bySymbol = {}
@@ -1732,6 +1788,13 @@ if (typeof module !== "undefined") {
     cycleSeconds: cycleSeconds,
     chartUrl: chartUrl,
     curlCommand: curlCommand,
+    responseLimit: responseLimit,
+    responseTooLarge: responseTooLarge,
+    MAX_RESPONSE_BYTES: MAX_RESPONSE_BYTES,
+    MAX_RESPONSE_BYTES_PER_SYMBOL: MAX_RESPONSE_BYTES_PER_SYMBOL,
+    FETCH_BATCH_SECONDS: FETCH_BATCH_SECONDS,
+    MAX_SERIES_POINTS: MAX_SERIES_POINTS,
+    parseSeries: parseSeries,
     stdinCommand: stdinCommand,
     utf8Length: utf8Length,
     quoteUrl: quoteUrl,

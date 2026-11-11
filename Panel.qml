@@ -670,6 +670,10 @@ Panel {
 
   function handleFetchOutput(text) {
     var raw = String(text || "")
+    if (Model.responseTooLarge(raw, fetchProc.responseLimit)) {
+      fetchError = "Response from Yahoo Finance too large"
+      return
+    }
     if (raw.replace(/\s+/g, "") === "") {
       // curl produced nothing (offline, DNS down): keep showing what we had.
       fetchError = "No response from Yahoo Finance"
@@ -707,6 +711,7 @@ Panel {
 
   function handleRatesOutput(text) {
     var raw = String(text || "")
+    if (Model.responseTooLarge(raw, ratesProc.responseLimit)) raw = ""
     var fresh = raw.replace(/\s+/g, "") === "" ? {} : Model.parseRateLines(raw, ratesRequested)
     var missing = false
     for (var i = 0; i < ratesRequested.length; i++) if (fresh[ratesRequested[i]] === undefined) missing = true
@@ -763,6 +768,7 @@ Panel {
   function handleChartOutput(text) {
     chartLoading = false
     var raw = String(text || "")
+    if (Model.responseTooLarge(raw, chartProc.responseLimit)) raw = ""
     var parts = chartRequestedKey.split("|")
     if (raw.replace(/\s+/g, "") !== "") {
       var parsed = Model.parseSeriesLines(raw, [parts[0]])

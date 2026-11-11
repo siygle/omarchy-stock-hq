@@ -8,9 +8,13 @@ import Quickshell.Io
 // even if it reads until end of input.
 Process {
   property string payload: ""
+  // Byte ceiling the spec's command enforces on stdout (0 = none); handlers
+  // drop output longer than this as a whole.
+  property real responseLimit: 0
 
   function start(spec) {
     payload = spec.stdin
+    responseLimit = spec.limit || 0
     command = spec.command
     stdinEnabled = true
     running = true
