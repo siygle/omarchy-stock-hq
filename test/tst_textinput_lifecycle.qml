@@ -45,6 +45,10 @@ TestCase {
       active: Model.detailPageLive(harness.opened, harness.page)
       sourceComponent: detailPage
     }
+    Loader {
+      active: Model.settingsPageLive(harness.opened, harness.page)
+      sourceComponent: settingsPage
+    }
   }
 
   Component {
@@ -52,6 +56,12 @@ TestCase {
     Item {
       TextField { objectName: "listName" }
       TextField { objectName: "addSymbols" }
+    }
+  }
+
+  Component {
+    id: settingsPage
+    Item {
       Loader {
         active: Model.settingsFieldLive(harness.opened, harness.page, harness.settingsOpen)
         sourceComponent: refreshField
@@ -87,10 +97,10 @@ TestCase {
 
   function test_settingsFieldAppearsAndIsDestroyed() {
     opened = true
-    page = "list"
+    page = "settings"
     settingsOpen = true
-    compare(names(), "addSymbols,listName,refreshMinutes")
-    settingsOpen = false
+    compare(names(), "refreshMinutes")
+    page = "list"
     compare(names(), "addSymbols,listName")
   }
 
@@ -98,7 +108,7 @@ TestCase {
     opened = true
     page = "list"
     settingsOpen = true
-    compare(names(), "addSymbols,listName,refreshMinutes")
+    compare(names(), "addSymbols,listName")
     page = "detail"
     compare(names(), "agentPrompt")
   }

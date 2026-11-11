@@ -398,6 +398,99 @@ test("normalizeColor: accepts #rgb/#rrggbb/#aarrggbb, rejects junk", () => {
   assert.equal(Model.normalizeColor(null), "")
 })
 
+test("theme palette prefers the config path and ignores empty files", () => {
+  const toml = 'foreground = "#c0caf5"\nbackground = "#1a1b26"\naccent = "#7aa2f7"\ngreen = "#9ece6a"\nred = "#f7768e"\nmuted = "#565f89"\n'
+  const pal = Model.parseThemePalette(toml)
+  assert.equal(pal.found, true)
+  assert.equal(pal.foreground, "#c0caf5")
+  assert.equal(pal.background, "#1a1b26")
+  assert.equal(Model.parseThemePalette("mode = \"dark\"\n").found, false)
+  const home = "/home/u"
+  assert.deepEqual(Model.themeColorPaths(home, home + "/.local/state/omarchy/current/theme"), [
+    home + "/.config/omarchy/current/theme/colors.toml",
+    home + "/.local/state/omarchy/current/theme/colors.toml"
+  ])
+  const chosen = Model.chooseThemeSource([
+    { path: "/cfg/colors.toml", text: "" },
+    { path: "/state/colors.toml", text: toml }
+  ])
+  assert.equal(chosen.path, "/state/colors.toml")
+  assert.equal(chosen.palette.green, "#9ece6a")
+  assert.equal(Model.chooseThemeSource([{ path: "/missing", text: "" }]).palette.found, false)
+  assert.equal(Model.themeNamePath("/home/u/.config/omarchy/current/theme/colors.toml"),
+    "/home/u/.config/omarchy/current/theme.name")
+  assert.equal(Model.themeParentPath("/home/u/.local/state/omarchy/current/theme/colors.toml"),
+    "/home/u/.local/state/omarchy/current")
+})
+
+test("theme directory replacement keeps the palette path and asks for a reread", () => {
+  const fs = require("fs")
+  const os = require("os")
+  const path = require("path")
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "omarchy-theme-"))
+  const current = path.join(rootDir, "current")
+  fs.mkdirSync(current)
+  function writeTheme(id, green) {
+    const dir = path.join(rootDir, id)
+    fs.mkdirSync(dir)
+    fs.writeFileSync(path.join(dir, "colors.toml"),
+      'foreground = "#c0caf5"\nbackground = "#1a1b26"\ngreen = "' + green + '"\nred = "#f7768e"\n')
+    return dir
+  }
+  const latte = writeTheme("catppuccin-latte", "#40a02b")
+  const gruvbox = writeTheme("gruvbox", "#98971a")
+  const link = path.join(current, "theme")
+  fs.symlinkSync(latte, link)
+  fs.writeFileSync(path.join(current, "theme.name"), "catppuccin-latte\n")
+  const colorsPath = Model.themeColorPaths(rootDir, "").find((p) => p.indexOf("/.config/") >= 0)
+    ? path.join(current, "theme", "colors.toml")
+    : path.join(current, "theme", "colors.toml")
+  function snapshot() {
+    return Model.chooseThemeSource([{ path: colorsPath, text: fs.readFileSync(colorsPath, "utf8") }])
+  }
+  assert.equal(snapshot().palette.green, "#40a02b")
+  assert.equal(fs.readFileSync(path.join(current, "theme.name"), "utf8").trim(), "catppuccin-latte")
+  // Wholesale replacement: the theme symlink (or directory) is swapped out.
+  fs.unlinkSync(link)
+  fs.symlinkSync(gruvbox, link)
+  fs.writeFileSync(path.join(current, "theme.name"), "gruvbox\n")
+  assert.equal(snapshot().palette.green, "#98971a")
+  assert.equal(snapshot().palette.found, true)
+  // The watch on the old inode fails; do not drop the palette until retries run out.
+  assert.deepEqual(Model.themeWatchReaction({ signal: "loadFailed", retries: 0 }),
+    { reread: true, clearText: false, resetRetries: false })
+  assert.deepEqual(Model.themeWatchReaction({ signal: "parentChanged", retries: 1 }),
+    { reread: true, clearText: false, resetRetries: false })
+  assert.deepEqual(Model.themeWatchReaction({ signal: "loaded", retries: 4 }),
+    { reread: false, clearText: false, resetRetries: true })
+  assert.deepEqual(Model.themeWatchReaction({ signal: "loadFailed", retries: Model.THEME_REREAD_LIMIT }),
+    { reread: false, clearText: true, resetRetries: false })
+})
+
+test("font family and size stay inside the panel limits", () => {
+  assert.equal(Model.normalizeFontFamily("  "), "")
+  assert.equal(Model.normalizeFontFamily("Theme"), "")
+  assert.equal(Model.normalizeFontFamily(" Noto Sans "), "Noto Sans")
+  assert.equal(Model.normalizeFontFamily("台積電 Sans"), "台積電 Sans")
+  assert.equal(Model.normalizeFontFamily("bad\nname"), "")
+  assert.equal(Model.normalizeFontFamily("x".repeat(90)).length, 80)
+  assert.equal(Model.fontFamilyIsCustom(""), false)
+  assert.equal(Model.fontFamilyIsCustom("serif"), false)
+  assert.equal(Model.fontFamilyIsCustom("Noto Sans"), true)
+  assert.equal(Model.customFontFieldLive(true, "settings", true), true)
+  assert.equal(Model.customFontFieldLive(true, "settings", false), false)
+  assert.equal(Model.customFontFieldLive(true, "list", true), false)
+  assert.equal(Model.normalizeFontSize(null), 13)
+  assert.equal(Model.normalizeFontSize(9), 11)
+  assert.equal(Model.normalizeFontSize(14), 14)
+  assert.equal(Model.normalizeFontSize(30), 14)
+  assert.equal(Model.fontRoles(11).caption, 10)
+  assert.equal(Model.fontRoles(11).body, 11)
+  assert.equal(Model.fontRoles(14).display, 18)
+  assert.equal(Model.FONT_SIZE_MIN, 11)
+  assert.equal(Model.FONT_SIZE_MAX, 14)
+})
+
 test("parseThemeColor: reads a key from Omarchy's colors.toml", () => {
   const toml = 'mode = "dark"\n\naccent = "#7daea3"\n\nred = "#ea6962"\ngreen = "#a9b665"\nbright_green = "#a9b665"\n'
   assert.equal(Model.parseThemeColor(toml, "green"), "#a9b665")

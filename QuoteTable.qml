@@ -14,6 +14,8 @@ Column {
   // Height budget from the panel; only the rows scroll to stay inside it.
   property real maxHeight: 100000
 
+  Component.onDestruction: if (stocks) stocks.editing = false
+
   spacing: Style.space(6)
 
   readonly property real gap: Style.space(6)
@@ -69,7 +71,7 @@ Column {
     }
     return h + spacing * Math.max(0, n - 1)
   }
-  readonly property real rowHeight: Style.font.body + Style.space(14)
+  readonly property real rowHeight: table.stocks.fonts.body + Style.space(14)
 
   onVisibleChanged: if (visible) listStrip.revealActive()
 
@@ -103,9 +105,9 @@ Column {
     textFormat: Text.PlainText
     width: table.w[column] || 0
     elide: Text.ElideRight
-    color: table.stocks.barForeground
+    color: table.stocks.textColor
     font.family: table.stocks.fontFamily
-    font.pixelSize: Style.font.bodySmall
+    font.pixelSize: table.stocks.fonts.bodySmall
     anchors.verticalCenter: parent ? parent.verticalCenter : undefined
   }
 
@@ -123,9 +125,9 @@ Column {
       Text {
         id: title
         text: "Stock HQ"
-        color: table.stocks.barForeground
+        color: table.stocks.textColor
         font.family: table.stocks.fontFamily
-        font.pixelSize: Style.font.subtitle
+        font.pixelSize: table.stocks.fonts.subtitle
         font.bold: true
       }
 
@@ -138,19 +140,19 @@ Column {
           text: "▲" + table.stocks.summary.up
           color: table.stocks.upColor
           font.family: table.stocks.fontFamily
-          font.pixelSize: Style.font.bodySmall
+          font.pixelSize: table.stocks.fonts.bodySmall
         }
         Text {
           text: "▼" + table.stocks.summary.down
           color: table.stocks.downColor
           font.family: table.stocks.fontFamily
-          font.pixelSize: Style.font.bodySmall
+          font.pixelSize: table.stocks.fonts.bodySmall
         }
         Text {
           text: "avg " + Model.formatSignedPct(table.stocks.summary.avgPct)
           color: table.signColor(table.stocks.summary.avgPct)
           font.family: table.stocks.fontFamily
-          font.pixelSize: Style.font.bodySmall
+          font.pixelSize: table.stocks.fonts.bodySmall
         }
       }
     }
@@ -177,110 +179,22 @@ Column {
           : (table.stocks.loading ? "Loading…" : "")
         color: table.stocks.mutedForeground
         font.family: table.stocks.fontFamily
-        font.pixelSize: Style.font.caption
+        font.pixelSize: table.stocks.fonts.caption
       }
 
       Chip {
         stocks: table.stocks
         text: "⚙"
-        fontSize: Style.font.body
-        selected: table.stocks.settingsOpen
-        onClicked: table.stocks.toggleSettings()
+        fontSize: table.stocks.fonts.body
+        selected: table.stocks.view === "settings"
+        onClicked: table.stocks.showSettings()
       }
 
       Chip {
         stocks: table.stocks
         text: "⟳"
-        fontSize: Style.font.body
+        fontSize: table.stocks.fonts.body
         onClicked: table.stocks.refresh()
-      }
-    }
-  }
-
-  // ---- Settings box: refresh interval and the watchlists JSON file.
-  Rectangle {
-    visible: table.stocks.settingsOpen
-    x: Style.space(8)
-    width: parent.width - Style.space(16)
-    height: settingsColumn.implicitHeight + Style.space(16)
-    radius: Style.cornerRadius
-    color: Qt.rgba(table.stocks.barForeground.r, table.stocks.barForeground.g, table.stocks.barForeground.b, 0.06)
-    border.color: Qt.rgba(table.stocks.barForeground.r, table.stocks.barForeground.g, table.stocks.barForeground.b, 0.16)
-    border.width: 1
-
-    Column {
-      id: settingsColumn
-      anchors.left: parent.left
-      anchors.right: parent.right
-      anchors.top: parent.top
-      anchors.margins: Style.space(8)
-      spacing: Style.space(8)
-
-      Row {
-        spacing: Style.space(6)
-
-        Text {
-          anchors.verticalCenter: parent.verticalCenter
-          text: "Refresh every"
-          color: table.stocks.mutedForeground
-          font.family: table.stocks.fontFamily
-          font.pixelSize: Style.font.caption
-        }
-        // Not created while the settings box is hidden. The box's visible
-        // flag would still construct this TextField.
-        Loader {
-          id: refreshLoader
-          active: Model.settingsFieldLive(table.stocks.opened, table.stocks.view, table.stocks.settingsOpen)
-          visible: active
-          width: Style.space(48)
-          height: item ? item.implicitHeight : 0
-          sourceComponent: refreshField
-        }
-        Text {
-          anchors.verticalCenter: parent.verticalCenter
-          text: "minutes ⏎"
-          color: table.stocks.mutedForeground
-          font.family: table.stocks.fontFamily
-          font.pixelSize: Style.font.caption
-        }
-
-        Item { width: Style.space(18); height: 1 }
-
-        Text {
-          anchors.verticalCenter: parent.verticalCenter
-          text: "Watchlists JSON"
-          color: table.stocks.mutedForeground
-          font.family: table.stocks.fontFamily
-          font.pixelSize: Style.font.caption
-        }
-        Chip {
-          anchors.verticalCenter: parent.verticalCenter
-          stocks: table.stocks
-          text: "Export"
-          onClicked: table.stocks.requestExportWatchlists()
-        }
-        Chip {
-          anchors.verticalCenter: parent.verticalCenter
-          stocks: table.stocks
-          text: "Import"
-          onClicked: table.stocks.requestImportWatchlists()
-        }
-        Chip {
-          anchors.verticalCenter: parent.verticalCenter
-          stocks: table.stocks
-          text: "Open JSON ↗"
-          onClicked: table.stocks.openWatchlistsFile()
-        }
-      }
-
-      Text {
-        width: parent.width
-        textFormat: Text.PlainText
-        text: table.stocks.fileDialogMessage !== "" ? table.stocks.fileDialogMessage : table.stocks.watchlistsPath
-        elide: Text.ElideMiddle
-        color: table.stocks.mutedForeground
-        font.family: table.stocks.fontFamily
-        font.pixelSize: Style.font.caption
       }
     }
   }
@@ -295,7 +209,7 @@ Column {
 
     ListView {
       id: listStrip
-      readonly property real chipHeight: Style.font.caption + Style.space(10)
+      readonly property real chipHeight: table.stocks.fonts.caption + Style.space(10)
       // Measured against the room the strip has without page buttons, so the
       // buttons appearing cannot feed back into it.
       readonly property bool overflowing: contentWidth > parent.width - listControls.width - Style.space(10)
@@ -402,9 +316,9 @@ Column {
         width: Style.space(130)
         text: table.stocks.activeList.name
         placeholderText: "List name ⏎"
-        foreground: table.stocks.barForeground
+        foreground: table.stocks.textColor
         font.family: table.stocks.fontFamily
-        font.pixelSize: Style.font.caption
+        font.pixelSize: table.stocks.fonts.caption
         verticalPadding: Style.space(2)
         onActiveFocusChanged: table.stocks.editing = activeFocus
         onAccepted: {
@@ -427,7 +341,7 @@ Column {
     }
   }
 
-  PanelSeparator { foreground: table.stocks.barForeground }
+  PanelSeparator { foreground: table.stocks.textColor }
 
   // ---- Column headers double as the sort controls: click cycles
   //      descending -> ascending -> watchlist order, right-click resets.
@@ -453,8 +367,8 @@ Column {
         height: headerText.implicitHeight + Style.space(6)
         radius: Style.cornerRadius
         color: header.sorted
-          ? Style.selectedFillFor(table.stocks.barForeground, Color.accent)
-          : (header.sortable && headerMouse.containsMouse ? Style.hoverFillFor(table.stocks.barForeground, Color.accent) : "transparent")
+          ? Style.selectedFillFor(table.stocks.textColor, table.stocks.accentColor)
+          : (header.sortable && headerMouse.containsMouse ? Style.hoverFillFor(table.stocks.textColor, table.stocks.accentColor) : "transparent")
 
         Text {
           id: headerText
@@ -466,9 +380,9 @@ Column {
           // Arrow on the inner side so right-aligned labels keep their edge.
           text: header.arrow === "" ? header.modelData.label
             : (header.modelData.right ? header.arrow + header.modelData.label : header.modelData.label + header.arrow)
-          color: header.sorted || (header.sortable && headerMouse.containsMouse) ? table.stocks.barForeground : table.stocks.mutedForeground
+          color: header.sorted || (header.sortable && headerMouse.containsMouse) ? table.stocks.textColor : table.stocks.mutedForeground
           font.family: table.stocks.fontFamily
-          font.pixelSize: Style.font.caption
+          font.pixelSize: table.stocks.fonts.caption
           font.bold: header.sorted
         }
 
@@ -525,8 +439,8 @@ Column {
           height: symbolCell.implicitHeight + Style.space(10)
           radius: Style.cornerRadius
           color: row.cursor
-            ? Style.selectedFillFor(table.stocks.barForeground, Color.accent)
-            : (row.hovered && row.valid ? Style.hoverFillFor(table.stocks.barForeground, Color.accent) : "transparent")
+            ? Style.selectedFillFor(table.stocks.textColor, table.stocks.accentColor)
+            : (row.hovered && row.valid ? Style.hoverFillFor(table.stocks.textColor, table.stocks.accentColor) : "transparent")
 
           MouseArea {
             id: rowMouse
@@ -546,8 +460,8 @@ Column {
               column: "symbol"
               text: row.q.symbol
               font.bold: true
-              font.pixelSize: Style.font.body
-              color: row.valid ? table.stocks.barForeground : table.stocks.mutedForeground
+              font.pixelSize: table.stocks.fonts.body
+              color: row.valid ? table.stocks.textColor : table.stocks.mutedForeground
             }
             Cell {
               column: "name"
@@ -559,7 +473,7 @@ Column {
               column: "price"
               horizontalAlignment: Text.AlignRight
               text: row.valid ? Model.formatPrice(row.q.price) : ""
-              font.pixelSize: Style.font.body
+              font.pixelSize: table.stocks.fonts.body
             }
             Cell {
               column: "change"
@@ -608,7 +522,7 @@ Column {
               low: row.q.week52Low
               high: row.q.week52High
               trackColor: table.stocks.mutedForeground
-              dotColor: table.stocks.barForeground
+              dotColor: table.stocks.textColor
             }
             Cell {
               column: "offHigh"
@@ -639,7 +553,7 @@ Column {
               horizontalAlignment: Text.AlignRight
               text: row.valid ? table.timeLabel(row.q.marketTime) : ""
               color: table.stocks.mutedForeground
-              font.pixelSize: Style.font.caption
+              font.pixelSize: table.stocks.fonts.caption
             }
             Row {
               width: table.w.remove
@@ -649,9 +563,9 @@ Column {
 
               Text {
                 text: "✎"
-                color: editMouse.containsMouse ? table.stocks.barForeground : table.stocks.mutedForeground
+                color: editMouse.containsMouse ? table.stocks.textColor : table.stocks.mutedForeground
                 font.family: table.stocks.fontFamily
-                font.pixelSize: Style.font.body
+                font.pixelSize: table.stocks.fonts.body
 
                 MouseArea {
                   id: editMouse
@@ -667,7 +581,7 @@ Column {
                 text: "×"
                 color: removeMouse.containsMouse ? table.stocks.urgentForeground : table.stocks.mutedForeground
                 font.family: table.stocks.fontFamily
-                font.pixelSize: Style.font.body
+                font.pixelSize: table.stocks.fonts.body
 
                 MouseArea {
                   id: removeMouse
@@ -691,7 +605,7 @@ Column {
     text: "Fetching quotes…"
     color: table.stocks.mutedForeground
     font.family: table.stocks.fontFamily
-    font.pixelSize: Style.font.bodySmall
+    font.pixelSize: table.stocks.fonts.bodySmall
     font.italic: true
   }
 
@@ -708,9 +622,9 @@ Column {
       placeholderText: table.stocks.editingIndex >= 0
         ? "Replace " + table.stocks.symbols[table.stocks.editingIndex] + " ⏎"
         : "Add symbols, e.g. TW:2330 ⏎"
-      foreground: table.stocks.barForeground
+      foreground: table.stocks.textColor
       font.family: table.stocks.fontFamily
-      font.pixelSize: Style.font.bodySmall
+      font.pixelSize: table.stocks.fonts.bodySmall
       verticalPadding: Style.spacing.controlPaddingY
       onActiveFocusChanged: table.stocks.editing = activeFocus
       onAccepted: {
@@ -735,11 +649,11 @@ Column {
       horizontalAlignment: Text.AlignRight
       color: table.stocks.mutedForeground
       font.family: table.stocks.fontFamily
-      font.pixelSize: Style.font.caption
+      font.pixelSize: table.stocks.fonts.caption
     }
   }
 
-  PanelSeparator { foreground: table.stocks.barForeground }
+  PanelSeparator { foreground: table.stocks.textColor }
 
   // ---- Footer: fetch failure (if any) and gist sync state.
   Item {
@@ -762,7 +676,7 @@ Column {
       elide: Text.ElideRight
       color: table.stocks.fetchError !== "" || parent.sync.status === "error" ? table.stocks.urgentForeground : table.stocks.mutedForeground
       font.family: table.stocks.fontFamily
-      font.pixelSize: Style.font.caption
+      font.pixelSize: table.stocks.fonts.caption
     }
 
     Row {
@@ -785,7 +699,7 @@ Column {
         }
         color: table.stocks.mutedForeground
         font.family: table.stocks.fontFamily
-        font.pixelSize: Style.font.caption
+        font.pixelSize: table.stocks.fonts.caption
       }
 
       Chip {
@@ -810,24 +724,6 @@ Column {
         active: !syncRow.sync.busy
         onClicked: syncRow.sync.create(table.stocks.watchlists)
       }
-    }
-  }
-
-  Component {
-    id: refreshField
-    TextField {
-      width: refreshLoader.width
-      text: String(table.stocks.refreshMinutes)
-      foreground: table.stocks.barForeground
-      font.family: table.stocks.fontFamily
-      font.pixelSize: Style.font.caption
-      verticalPadding: Style.space(2)
-      onActiveFocusChanged: table.stocks.editing = activeFocus
-      onAccepted: {
-        table.stocks.saveRefreshMinutes(text)
-        table.stocks.releaseInput()
-      }
-      Keys.onEscapePressed: table.stocks.releaseInput()
     }
   }
 }

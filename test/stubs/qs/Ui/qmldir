@@ -1,0 +1,3 @@
+module qs.Ui
+PanelSeparator 1.0 PanelSeparator.qml
+TextField 1.0 TextField.qml

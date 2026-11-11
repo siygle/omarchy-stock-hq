@@ -130,13 +130,42 @@ Panel {
     ? panel.availableCardHeight - panel.verticalContentInset : 100000
 
   // ---- Presentation helpers shared by every row.
-  readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
-  readonly property color mutedForeground: Qt.darker(barForeground, 1.5)
+  readonly property string fontFamilySetting: Model.normalizeFontFamily(setting("fontFamily", ""))
+  readonly property string fontFamily: fontFamilySetting !== "" ? fontFamilySetting : (bar && bar.fontFamily ? bar.fontFamily : "monospace")
+  readonly property int fontSize: Model.normalizeFontSize(setting("fontSize", Model.FONT_SIZE_DEFAULT))
+  readonly property var fonts: Model.fontRoles(fontSize)
   readonly property color urgentForeground: bar ? bar.urgent : Color.urgent
 
-  // Up/down tints: settings override > theme palette (colors.toml) > fallback.
-  property string themeGreen: ""
-  property string themeRed: ""
+  // Theme file texts. Preference is applied in themeChoice.
+  property string configThemeText: ""
+  property string shellThemeText: ""
+  property string stateThemeText: ""
+  property string themeNameText: ""
+  property int themeRereads: 0
+  property bool themeRetargeting: false
+  property bool customFontOpen: false
+  readonly property var themeChoice: Model.chooseThemeSource([
+    { path: homeDir + "/.config/omarchy/current/theme/colors.toml", text: configThemeText },
+    { path: (Color.currentThemePath || "") + "/colors.toml", text: shellThemeText },
+    { path: homeDir + "/.local/state/omarchy/current/theme/colors.toml", text: stateThemeText }
+  ])
+  readonly property var themePalette: themeChoice.palette
+  readonly property bool hasTheme: themePalette.found === true
+  readonly property string themeStatus: {
+    if (!hasTheme) return "Not found — using shell colors"
+    var name = String(themeNameText || "").replace(/^\s+|\s+$/g, "")
+    return name !== "" ? name : "Current Omarchy theme"
+  }
+  readonly property color textColor: hasTheme && themePalette.foreground !== "" ? themePalette.foreground : barForeground
+  readonly property color surfaceColor: hasTheme && themePalette.background !== "" ? themePalette.background : "transparent"
+  readonly property color accentColor: hasTheme && themePalette.accent !== "" ? themePalette.accent : Color.accent
+  readonly property color mutedForeground: {
+    if (hasTheme && themePalette.muted !== "") return themePalette.muted
+    if (hasTheme && themePalette.dark_foreground !== "") return themePalette.dark_foreground
+    return Qt.darker(textColor, 1.5)
+  }
+  readonly property string themeGreen: hasTheme ? (themePalette.green || "") : ""
+  readonly property string themeRed: hasTheme ? (themePalette.red || "") : ""
   readonly property color upColor: upColorSetting !== "" ? upColorSetting : (themeGreen !== "" ? themeGreen : "#5fbf6f")
   readonly property color downColor: downColorSetting !== "" ? downColorSetting : (themeRed !== "" ? themeRed : urgentForeground)
 
@@ -153,20 +182,137 @@ Panel {
     return barForeground
   }
 
+  readonly property string configThemePath: homeDir + "/.config/omarchy/current/theme/colors.toml"
+  readonly property string stateThemePath: homeDir + "/.local/state/omarchy/current/theme/colors.toml"
+  readonly property string shellThemePath: (Color.currentThemePath || "") + "/colors.toml"
+  readonly property string stateThemeNamePath: Model.themeNamePath(stateThemePath)
+  readonly property string stateThemeParent: Model.themeParentPath(stateThemePath)
+  readonly property string configThemeParent: Model.themeParentPath(configThemePath)
+
+  // omarchy-theme-set replaces current/theme (or swaps that symlink). A watch
+  // on colors.toml then points at a deleted inode and never sees the new
+  // file, so the page stays on "Not found" even though the path is valid.
+  // Watch the parent directory too, and re-bind every theme path on change
+  // or error. A slow retry keeps running while no palette is loaded.
+  function noteThemeWatch(signal, slot) {
+    if (themeRetargeting) return
+    var reaction = Model.themeWatchReaction({ signal: signal, retries: themeRereads })
+    if (reaction.resetRetries) themeRereads = 0
+    if (reaction.clearText) clearThemeSlot(slot)
+    if (reaction.reread) rereadThemes(false)
+  }
+
+  function clearThemeSlot(slot) {
+    if (slot === "config") configThemeText = ""
+    else if (slot === "shell") shellThemeText = ""
+    else if (slot === "state") stateThemeText = ""
+    else if (slot === "name") themeNameText = ""
+  }
+
+  function rereadThemes(force) {
+    if (themeRetargeting) return
+    if (!force && themeRereads >= Model.THEME_REREAD_LIMIT) return
+    themeRereads = themeRereads + 1
+    themeRetargeting = true
+    configThemeFile.path = ""
+    shellThemeFile.path = ""
+    stateThemeFile.path = ""
+    themeNameFile.path = ""
+    stateThemeDir.path = ""
+    configThemeDir.path = ""
+    themeRetargetTimer.restart()
+  }
+
+  function restoreThemePaths() {
+    configThemeFile.path = configThemePath
+    shellThemeFile.path = shellThemePath
+    stateThemeFile.path = stateThemePath
+    themeNameFile.path = stateThemeNamePath
+    stateThemeDir.path = stateThemeParent
+    configThemeDir.path = configThemeParent
+    configThemeFile.reload()
+    shellThemeFile.reload()
+    stateThemeFile.reload()
+    themeNameFile.reload()
+    themeRetargeting = false
+  }
+
+  Timer {
+    id: themeRetargetTimer
+    interval: 80
+    onTriggered: root.restoreThemePaths()
+  }
+
+  Timer {
+    // Safety net: if every watch was dropped, keep re-opening the paths
+    // until a palette loads. Stops on its own once hasTheme is true.
+    interval: 700
+    repeat: true
+    running: !root.hasTheme
+    onTriggered: root.rereadThemes(true)
+  }
+
   FileView {
-    id: themeColors
-    path: Color.currentThemePath + "/colors.toml"
+    id: configThemeDir
+    path: root.configThemeParent
     watchChanges: true
     printErrors: false
-    onFileChanged: reload()
+    onFileChanged: root.noteThemeWatch("parentChanged", "dir")
+  }
+  FileView {
+    id: stateThemeDir
+    path: root.stateThemeParent
+    watchChanges: true
+    printErrors: false
+    onFileChanged: root.noteThemeWatch("parentChanged", "dir")
+  }
+  FileView {
+    id: configThemeFile
+    path: root.configThemePath
+    watchChanges: true
+    printErrors: false
+    onFileChanged: root.noteThemeWatch("fileChanged", "config")
     onLoaded: {
-      root.themeGreen = Model.parseThemeColor(text(), "green")
-      root.themeRed = Model.parseThemeColor(text(), "red")
+      root.configThemeText = text()
+      root.noteThemeWatch("loaded", "config")
     }
-    onLoadFailed: {
-      root.themeGreen = ""
-      root.themeRed = ""
+    onLoadFailed: root.noteThemeWatch("loadFailed", "config")
+  }
+  FileView {
+    id: shellThemeFile
+    path: root.shellThemePath
+    watchChanges: true
+    printErrors: false
+    onFileChanged: root.noteThemeWatch("fileChanged", "shell")
+    onLoaded: {
+      root.shellThemeText = text()
+      root.noteThemeWatch("loaded", "shell")
     }
+    onLoadFailed: root.noteThemeWatch("loadFailed", "shell")
+  }
+  FileView {
+    id: stateThemeFile
+    path: root.stateThemePath
+    watchChanges: true
+    printErrors: false
+    onFileChanged: root.noteThemeWatch("fileChanged", "state")
+    onLoaded: {
+      root.stateThemeText = text()
+      root.noteThemeWatch("loaded", "state")
+    }
+    onLoadFailed: root.noteThemeWatch("loadFailed", "state")
+  }
+  FileView {
+    id: themeNameFile
+    path: root.stateThemeNamePath
+    watchChanges: true
+    printErrors: false
+    onFileChanged: root.noteThemeWatch("fileChanged", "name")
+    onLoaded: {
+      root.themeNameText = text()
+      root.noteThemeWatch("loaded", "name")
+    }
+    onLoadFailed: root.noteThemeWatch("loadFailed", "name")
   }
 
   function open() {
@@ -327,8 +473,28 @@ Panel {
   }
 
   // ---- Settings box: refresh interval, import / export / open JSON.
+  function showSettings() {
+    view = "settings"
+    releaseInput()
+  }
+
   function toggleSettings() {
-    settingsOpen = !settingsOpen
+    if (view === "settings") showList()
+    else showSettings()
+  }
+
+  function selectFontFamily(family) {
+    if (family === "custom") {
+      customFontOpen = true
+      return
+    }
+    var clean = Model.normalizeFontFamily(family)
+    customFontOpen = Model.fontFamilyIsCustom(clean)
+    updateSettings({ fontFamily: clean })
+  }
+
+  function selectFontSize(size) {
+    updateSettings({ fontSize: Model.normalizeFontSize(size) })
   }
 
   function saveRefreshMinutes(text) {
@@ -684,7 +850,10 @@ Panel {
   // after this component loads (Loader.onLoaded runs before callLater fires).
   // Storage is made owner-only first (storageProc then loads and fetches), so
   // nothing is read or written before the files are 0600.
-  Component.onCompleted: Qt.callLater(function() { storageProc.running = true })
+  Component.onCompleted: {
+    if (Model.fontFamilyIsCustom(fontFamilySetting)) customFontOpen = true
+    Qt.callLater(function() { storageProc.running = true })
+  }
 
   FileView {
     id: watchlistsFile
@@ -862,7 +1031,7 @@ Panel {
       anchors.fill: parent
       blocked: root.editing
       // Esc steps back from a symbol to the table before it closes the panel.
-      onCloseRequested: root.view === "detail" ? root.showList() : root.close()
+      onCloseRequested: (root.view === "detail" || root.view === "settings") ? root.showList() : root.close()
       onActivateRequested: root.activateCursor()
       onMoveRequested: function(dx, dy) {
         if (dy !== 0) root.moveCursor(dy)
@@ -890,6 +1059,8 @@ Panel {
           height: Math.min(detailColumn.implicitHeight, root.maxContentHeight)
           contentWidth: width
           contentHeight: detailColumn.implicitHeight
+          Component.onCompleted: contentY = 0
+          Component.onDestruction: root.editing = false
           clip: true
           interactive: contentHeight > height
           boundsBehavior: Flickable.StopAtBounds
@@ -908,14 +1079,18 @@ Panel {
         width: parent.width
         spacing: 0
 
+        // Do not bind height to item.height. An explicit Loader height resizes
+        // the loaded Column to that value; before layout that value is 0, so
+        // the quote table, gear and settings page collapse into an empty frame.
+        // With only width set, the Loader follows the item's implicit height,
+        // including error rows when quotes cannot be fetched.
         Loader {
           id: tableLoader
           width: parent.width
           active: Model.listPageLive(root.opened, root.view)
           visible: active
-          height: item ? item.height : 0
           sourceComponent: quoteTablePage
-          onUnloaded: root.editing = false
+          onActiveChanged: if (!active) root.editing = false
         }
 
         Loader {
@@ -923,11 +1098,34 @@ Panel {
           width: parent.width
           active: Model.detailPageLive(root.opened, root.view)
           visible: active
-          height: item ? item.height : 0
           sourceComponent: detailPage
-          onLoaded: if (item) item.contentY = 0
-          onUnloaded: root.editing = false
+          onActiveChanged: if (!active) root.editing = false
         }
+
+        Loader {
+          id: settingsLoader
+          width: parent.width
+          active: Model.settingsPageLive(root.opened, root.view)
+          visible: active
+          sourceComponent: settingsPage
+          onActiveChanged: if (!active) root.editing = false
+        }
+      }
+
+      Component {
+        id: settingsPage
+        SettingsView {
+          width: settingsLoader.width
+          stocks: root
+        }
+      }
+
+      Rectangle {
+        z: -1
+        width: parent.width
+        height: content.height
+        visible: root.hasTheme && root.surfaceColor != "transparent"
+        color: root.surfaceColor
       }
     }
   }

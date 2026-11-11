@@ -1,0 +1,5 @@
+module Quickshell
+singleton Quickshell 1.0 Quickshell.qml
+Panel 1.0 Panel.qml
+KeyboardPanel 1.0 KeyboardPanel.qml
+PanelKeyCatcher 1.0 PanelKeyCatcher.qml

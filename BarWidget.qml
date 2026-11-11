@@ -127,15 +127,15 @@ BarWidget {
           text: modelData.text
           textFormat: Text.PlainText
           color: modelData.down ? root.downColor : (modelData.up ? root.upColor : button.foreground)
-          font.family: button.fontFamily
-          font.pixelSize: button.fontSize
+          font.family: panelLoader.item ? panelLoader.item.fontFamily : button.fontFamily
+          font.pixelSize: panelLoader.item ? panelLoader.item.fonts.body : button.fontSize
           renderType: Text.NativeRendering
         }
         Text {
           text: tape.separator
           color: Qt.darker(button.foreground, 1.6)
-          font.family: button.fontFamily
-          font.pixelSize: button.fontSize
+          font.family: panelLoader.item ? panelLoader.item.fontFamily : button.fontFamily
+          font.pixelSize: panelLoader.item ? panelLoader.item.fonts.body : button.fontSize
           renderType: Text.NativeRendering
         }
       }
