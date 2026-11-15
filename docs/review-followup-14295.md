@@ -36,14 +36,22 @@ availability against someone able to rename/remove entries in that directory.
 ## Direct-process destruction
 
 Quickshell now owns a waiting shell, which launches `timeout` as an independent
-child. Normal TERM/HUP/INT is forwarded to the timeout monitor. SIGKILL of the
-direct owner cannot kill the independent monitor, so it retains the batch's
-60-second deadline and two-second TERM-to-KILL escalation.
+child. The two ways Quickshell stops that shell behave differently:
 
-This deliberately does **not** promise immediate cancellation on destructor
-SIGKILL: descendants may continue until the original deadline plus kill grace.
-It implements the reviewer's alternative of retaining an independent enforcing
-supervisor. fd 3 preserves stdin explicitly when starting the asynchronous child;
+| Stop path | Signal to the shell | What happens to the batch |
+|---|---|---|
+| `running = false` (e.g. the watchlist changes mid-fetch) | SIGTERM (`QProcess::terminate`, [`process.cpp:45-49`][qs-setrunning]) | The trap forwards TERM to the monitor; the batch stops at once. |
+| Panel or shell unload (Process destructor) | SIGKILL (`QProcess::kill`, [`process.cpp:31-39`][qs-dtor]) | Nothing is forwarded (SIGKILL cannot be trapped). The monitor survives and ends the batch at its 60-second deadline plus the two-second TERM-to-KILL grace. |
+
+The second row is the normal Quickshell shutdown and reload path, not an edge
+case: when Quickshell exits cleanly, the batch is **not** cancelled
+immediately; it is bounded by the original deadline. This implements the
+reviewer's alternative of retaining an independent enforcing supervisor, and
+was confirmed on an Omarchy machine (a clean Quickshell exit left the batch
+running until the 60-second deadline).
+
+[qs-setrunning]: https://github.com/quickshell-mirror/quickshell/blob/4f508be500dea6e5732cc3d50382a0048b17e7b1/src/io/process.cpp#L45-L49
+[qs-dtor]: https://github.com/quickshell-mirror/quickshell/blob/4f508be500dea6e5732cc3d50382a0048b17e7b1/src/io/process.cpp#L31-L39 fd 3 preserves stdin explicitly when starting the asynchronous child;
 POSIX shells otherwise replace an asynchronous command's stdin with `/dev/null`.
 
 Regression tests kill only the direct owner with SIGKILL and check both a real
@@ -51,9 +59,18 @@ hanging curl and a TERM-resistant workload. They shorten the real supervisor's
 deadline to two seconds, verify it survives owner death, and verify all recorded
 batch descendants (including head/sleep, not just marker-bearing commands) cease
 running after the deadline/grace. Unreaped container zombies are distinguished
-from running processes. No actual Quickshell teardown was run.
+from running processes.
 
 ## Validation
+
+### Omarchy (target runtime)
+
+On one Omarchy machine (Quickshell 0.3.2, Qt 6.12.0) the plugin loaded and
+ran with no warnings; the only finding was the stop-path behaviour now
+documented above (a clean Quickshell exit did not cancel the batch early; it
+ended at the 60-second deadline).
+
+### Container
 
 Executed in a Debian 12 Linux amd64 Docker container on a macOS host:
 
@@ -74,5 +91,5 @@ git diff --check
 
 The Node suite includes real-curl response bounds, export permissions, qmllint
 against the existing stubs, literal-label rendering and offscreen screenshots.
-This is not validation on Omarchy, Quickshell 0.3.2 or Qt 6.12; repeat there before
-claiming target-runtime validation or requesting marketplace approval.
+The container run alone is not target-runtime validation; see the Omarchy
+section above.

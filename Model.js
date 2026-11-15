@@ -253,11 +253,14 @@ function responseTooLarge(text, limit) {
 //   single response that announces more than the per-symbol limit. The
 //   panel discards any output longer than `limit` (responseTooLarge).
 // - An independent `timeout` bounds the whole batch, not just each transfer.
-//   Quickshell owns a waiting shell, NOT the timeout monitor: its destructor
-//   SIGKILLs only that direct PID. The monitor survives that SIGKILL and still
-//   enforces the deadline and group-wide TERM/KILL escalation. Normal TERM
-//   is forwarded by the waiting shell. After abrupt destruction descendants
-//   may run until the batch deadline (plus the two-second kill grace).
+//   Quickshell owns a waiting shell, NOT the timeout monitor. When the panel
+//   is unloaded, Quickshell's Process destructor sends SIGKILL to that direct
+//   PID only (QProcess::kill). SIGKILL cannot be trapped, so nothing is
+//   forwarded: the monitor survives and the batch ends at its deadline (60 s,
+//   plus the two-second TERM-to-KILL grace), not immediately. This is the
+//   normal unload path, not an edge case.
+//   Setting `running = false` instead sends SIGTERM (QProcess::terminate),
+//   which the waiting shell's trap forwards, stopping the batch at once.
 function curlCommand(symbols, userAgent, range) {
   var config = ""
   for (var i = 0; i < symbols.length; i++) config += "url = " + JSON.stringify(chartUrl(symbols[i], range)) + "\n"
