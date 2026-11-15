@@ -53,7 +53,7 @@ test("a foreign 0666 target is left untouched and a fresh unique name is used", 
   // Reports another uid as the target's owner (unprivileged test runs cannot
   // create a file owned by someone else); everything else is the real stat.
   shim(ctx.bin, "stat", 'for a; do last=$a; done\n' +
-    'if [ "$1" = -c ] && [ "$2" = %u ] && [ "$last" = "$STOCKHQ_FOREIGN" ]; then echo 4242; exit 0; fi\n' +
+    'if [ "$1" = -c ] && [ "$2" = %u ] && [ "$(readlink -m -- "$last")" = "$STOCKHQ_FOREIGN" ]; then echo 4242; exit 0; fi\n' +
     'exec ' + realStat + ' "$@"')
   const r = exportTo(ctx, { STOCKHQ_FOREIGN: ctx.target })
   assert.equal(r.code, 0)
@@ -109,6 +109,59 @@ test("a chmod that reports success but leaves the file readable fails closed", (
   assert.equal(fs.readFileSync(ctx.target, "utf8"), "old")
   assert.deepEqual(fs.readdirSync(ctx.dir), [path.basename(ctx.target)])
   fs.rmSync(ctx.base, { recursive: true, force: true })
+})
+
+test("another UID cannot intercept the payload by replacing staging after validation", {
+  skip: process.platform !== "linux" || !process.getuid || process.getuid() !== 0 || spawnSync("runuser", ["--version"]).status !== 0
+}, () => {
+  const ctx = setup()
+  fs.chmodSync(ctx.base, 0o755)
+  // Trigger precisely between the last file check and head's data write.
+  // A real second UID renames the staging directory and installs a readable
+  // replacement payload. The shell's cwd must remain in the original inode.
+  shim(ctx.bin, "stat", 'for a; do last=$a; done\n' +
+    'if [ "$2" = %a ] && [ "$last" = ./payload ]; then\n' +
+    '  checked=$(' + realStat + ' "$@") || exit 91\n' +
+    '  stage=$(find "$STOCKHQ_SHARED" -maxdepth 1 -type d -name ".omarchy-stock-hq-export.*")\n' +
+    '  runuser -u nobody -- sh -c \'cd /; mv -- "$1" "$1-moved" && mkdir -- "$1" && chmod 777 "$1" && : > "$1/payload" && chmod 666 "$1/payload"\' sh "$stage" || exit 90\n' +
+    '  printf "%s\\n" "$checked"; exit 0\nfi\n' +
+    'exec ' + realStat + ' "$@"')
+  try {
+    const r = exportTo(ctx, { STOCKHQ_SHARED: ctx.dir })
+    assert.equal(r.code, 0, r.output)
+    assert.equal(fs.readFileSync(r.output, "utf8"), BODY)
+    assert.equal(mode(r.output), 0o600)
+    const replacement = fs.readdirSync(ctx.dir).find((n) => n.startsWith(".omarchy-stock-hq-export.") && !n.endsWith("-moved"))
+    assert.ok(replacement, "attacker actually replaced the staging pathname")
+    const exposed = path.join(ctx.dir, replacement, "payload")
+    assert.equal(fs.statSync(exposed).uid, 65534)
+    assert.equal(fs.readFileSync(exposed, "utf8"), "", "attacker received no private bytes")
+    assert.equal(spawnSync("runuser", ["-u", "nobody", "--", "cat", r.output]).status, 1, "published inode is unreadable by attacker")
+  } finally {
+    fs.rmSync(ctx.base, { recursive: true, force: true })
+  }
+})
+
+test("staging replaced before cd is rejected before any private data is written", {
+  skip: process.platform !== "linux" || !process.getuid || process.getuid() !== 0 || spawnSync("runuser", ["--version"]).status !== 0
+}, () => {
+  const ctx = setup()
+  fs.chmodSync(ctx.base, 0o755)
+  const realMktemp = spawnSync("sh", ["-c", "command -v mktemp"]).stdout.toString().trim()
+  shim(ctx.bin, "mktemp", 'stage=$(' + realMktemp + ' "$@") || exit 91\n' +
+    'runuser -u nobody -- sh -c \'cd /; mv -- "$1" "$1-moved" && mkdir -- "$1" && chmod 700 "$1"\' sh "$stage" || exit 90\n' +
+    'printf "%s\\n" "$stage"')
+  try {
+    const r = exportTo(ctx)
+    assert.notEqual(r.code, 0)
+    assert.match(r.output, /staging directory is not private/)
+    assert.equal(fs.existsSync(ctx.target), false)
+    for (const name of fs.readdirSync(ctx.dir)) {
+      assert.deepEqual(fs.readdirSync(path.join(ctx.dir, name)), [], "no payload created in either directory")
+    }
+  } finally {
+    fs.rmSync(ctx.base, { recursive: true, force: true })
+  }
 })
 
 test("a missing folder fails and the payload never reaches argv", () => {
