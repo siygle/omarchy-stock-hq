@@ -4,6 +4,7 @@
 const test = require("node:test")
 const assert = require("node:assert/strict")
 const http = require("node:http")
+const fs = require("node:fs")
 const { spawn, spawnSync } = require("node:child_process")
 const Model = require("../Model.js")
 
@@ -23,6 +24,22 @@ function localSpec(url, count, marker) {
   return { command, stdin: config, limit: spec.limit }
 }
 
+function descendants(pid) {
+  const children = spawnSync("pgrep", ["-P", String(pid)]).stdout.toString().trim().split(/\s+/).map(Number).filter((n) => n > 0)
+  return children.flatMap((child) => [child, ...descendants(child)])
+}
+
+function running(pid) {
+  try {
+    // Orphaned zombies may await container PID 1's reaping; they are not
+    // executing and cannot retain sockets/pipe descriptors.
+    return !/\) [ZX] /.test(fs.readFileSync("/proc/" + pid + "/stat", "utf8"))
+  } catch (error) {
+    if (error.code === "ENOENT") return false
+    throw error
+  }
+}
+
 function run(spec) {
   return new Promise((resolve) => {
     const child = spawn(spec.command[0], spec.command.slice(1), { stdio: ["pipe", "pipe", "pipe"] })
@@ -35,9 +52,10 @@ function run(spec) {
 
 test("curlCommand: byte cap, per-response cap and batch deadline are in the command", () => {
   const spec = Model.curlCommand(["AAPL", "MSFT"], "ua")
-  assert.deepEqual(spec.command.slice(0, 4), ["timeout", "-k", "2", String(Model.FETCH_BATCH_SECONDS)])
-  assert.match(spec.command[6], /--max-filesize "\$3"/)
-  assert.match(spec.command[6], /\| head -c "\$4"$/)
+  assert.equal(spec.command[0], "sh")
+  assert.deepEqual(spec.command.slice(4, 8), ["timeout", "-k", "2", String(Model.FETCH_BATCH_SECONDS)])
+  assert.match(spec.command[10], /--max-filesize "\$3"/)
+  assert.match(spec.command[10], /\| head -c "\$4"$/)
   assert.equal(spec.limit, 2 * Model.MAX_RESPONSE_BYTES_PER_SYMBOL)
   assert.equal(spec.command[spec.command.length - 1], String(spec.limit + 1))
   assert.equal(Model.responseLimit(10000), Model.MAX_RESPONSE_BYTES)
@@ -93,13 +111,56 @@ test("stopping the batch kills sh, head and curl (process group)", async () => {
   await new Promise((resolve) => setTimeout(resolve, 500))
   assert.equal(spawnSync("pgrep", ["-f", marker]).status, 0, "curl is running")
   const exited = new Promise((resolve) => child.on("close", resolve))
-  child.kill("SIGTERM")  // what Quickshell does when the Process stops
+  child.kill("SIGTERM")  // normal stop, not the destructor's direct-PID SIGKILL
   await exited
   await new Promise((resolve) => setTimeout(resolve, 300))
   assert.equal(spawnSync("pgrep", ["-f", marker]).status, 1, "no child left behind")
   server.close()
   server.closeAllConnections()
 })
+
+// Quickshell's destructor kills ONLY its direct child with SIGKILL. Exercise
+// that boundary, not SIGTERM forwarding. Use a short real supervisor deadline;
+// the production deadline is still FETCH_BATCH_SECONDS (60 s).
+for (const stubborn of [false, true]) {
+  test("direct-owner SIGKILL preserves independent group deadline" + (stubborn ? " (TERM-resistant child)" : " (real curl)"), { timeout: 10000 }, async () => {
+    const server = await listen(() => {})
+    const marker = "stock-hq-destructor-" + process.pid + "-" + Number(stubborn)
+    const spec = localSpec("http://127.0.0.1:" + server.address().port + "/chart", 1, marker)
+    spec.command[7] = "2"
+    if (stubborn) spec.command[10] = 'trap "" TERM; while :; do sleep 1; done'
+    const child = spawn(spec.command[0], spec.command.slice(1), { stdio: ["pipe", "ignore", "ignore"] })
+    const exited = new Promise((resolve) => child.on("exit", resolve))
+    child.stdin.on("error", () => {})
+    child.stdin.end(spec.stdin)
+    let monitor
+    try {
+      for (let i = 0; i < 50; i++) {
+        monitor = Number(spawnSync("pgrep", ["-P", String(child.pid)]).stdout.toString().trim())
+        if (monitor > 0 && spawnSync("pgrep", ["-f", marker]).status === 0) break
+        await new Promise((resolve) => setTimeout(resolve, 20))
+      }
+      assert.ok(monitor > 0, "independent timeout started")
+      await new Promise((resolve) => setTimeout(resolve, 150))
+      const batch = [monitor, ...descendants(monitor)]
+      assert.ok(batch.length >= 3, "recorded supervisor, shell and actual batch children")
+      child.kill("SIGKILL")
+      await exited
+      assert.doesNotThrow(() => process.kill(monitor, 0), "timeout survived the owner's SIGKILL")
+      const deadline = Date.now() + 6500
+      while ((batch.some(running) || spawnSync("pgrep", ["-f", marker]).status === 0) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+      assert.deepEqual(batch.filter(running), [], "no recorded descendant (including head/sleep) survived deadline + kill grace")
+      assert.equal(spawnSync("pgrep", ["-f", marker]).status, 1, "no batch command survived deadline + kill grace")
+    } finally {
+      child.kill("SIGKILL")
+      if (monitor > 0) { try { process.kill(-monitor, "SIGKILL") } catch (_) {} }
+      server.closeAllConnections()
+      server.close()
+    }
+  })
+}
 
 test("parsed provider rows and strings are bounded before reaching QML", () => {
   const n = Model.MAX_SERIES_POINTS + 1

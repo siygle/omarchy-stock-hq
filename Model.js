@@ -252,16 +252,23 @@ function responseTooLarge(text, limit) {
 //   holds without a Content-Length; `--max-filesize` additionally refuses a
 //   single response that announces more than the per-symbol limit. The
 //   panel discards any output longer than `limit` (responseTooLarge).
-// - `timeout` bounds the whole batch, not just each transfer, and is the
-//   process Quickshell starts: stopping it, or the deadline, signals the
-//   whole process group (sh, head, curl), so no child is left running.
+// - An independent `timeout` bounds the whole batch, not just each transfer.
+//   Quickshell owns a waiting shell, NOT the timeout monitor. When the panel
+//   is unloaded, Quickshell's Process destructor sends SIGKILL to that direct
+//   PID only (QProcess::kill). SIGKILL cannot be trapped, so nothing is
+//   forwarded: the monitor survives and the batch ends at its deadline (60 s,
+//   plus the two-second TERM-to-KILL grace), not immediately. This is the
+//   normal unload path, not an edge case.
+//   Setting `running = false` instead sends SIGTERM (QProcess::terminate),
+//   which the waiting shell's trap forwards, stopping the batch at once.
 function curlCommand(symbols, userAgent, range) {
   var config = ""
   for (var i = 0; i < symbols.length; i++) config += "url = " + JSON.stringify(chartUrl(symbols[i], range)) + "\n"
   var limit = responseLimit(symbols.length)
   var script = "head -c \"$1\" | curl -sS --max-time 10 --max-filesize \"$3\" -A \"$2\" -w '\\n' -K - | head -c \"$4\""
   return {
-    command: ["timeout", "-k", "2", String(FETCH_BATCH_SECONDS), "sh", "-c", script, "sh",
+    command: ["sh", "-c", 'exec 3<&0; "$@" <&3 3<&- & monitor=$!; exec 3<&-; trap \'kill -TERM "$monitor" 2>/dev/null; wait "$monitor"; exit 143\' TERM HUP INT; wait "$monitor"', "sh",
+      "timeout", "-k", "2", String(FETCH_BATCH_SECONDS), "sh", "-c", script, "sh",
       String(utf8Length(config)), String(userAgent || "omarchy-stock-hq"),
       String(MAX_RESPONSE_BYTES_PER_SYMBOL), String(limit + 1)],
     stdin: config,
@@ -1649,10 +1656,14 @@ function privateStorageCommand(dirs, files) {
 // other local users. The data never passes through FileView/QSaveFile there
 // (QSaveFile copies an existing target's permissions). Instead, in the
 // chosen folder:
-// 1. mktemp creates a new temporary file (O_EXCL, so never someone else's
-//    file or a symlink); chmod 600 and an ownership/mode/regular-file check
-//    must both succeed, otherwise nothing is written (fails closed).
-// 2. The JSON (stdin, exactly $2 bytes) goes into that private file.
+// 1. Enter a fresh private staging directory, then validate the actual cwd
+//    (not its replaceable pathname). cwd pins that directory inode even if a
+//    different UID renames/replaces its entry in the shared parent. Once cwd
+//    is verified owned by us and 0700, that UID cannot replace files inside.
+// 2. Create/check/write the 0600 payload relative to this pinned private cwd.
+//    Publication uses rename of that same safe inode, never a data copy into
+//    a shared pathname. Addressing the destination via cwd's parent (`../`)
+//    keeps it on the same filesystem even if absolute parent paths change.
 // 3. It is renamed over the target only when the target is missing or is
 //    our own regular file. A target owned by someone else, a symlink or
 //    anything else is left untouched and a fresh unique name is used
@@ -1666,19 +1677,24 @@ var EXPORT_SCRIPT = "umask 077\n" +
     "[ -d \"$dir\" ] || { echo \"folder not found: $dir\"; exit 1; }\n" +
     "mine() { [ ! -L \"$1\" ] && [ -f \"$1\" ] && [ \"$(stat -c %u -- \"$1\")\" = \"$me\" ]; }\n" +
     "private() { mine \"$1\" && [ \"$(stat -c %a -- \"$1\")\" = 600 ]; }\n" +
-    "tmp=$(mktemp -- \"$dir/.omarchy-stock-hq-export.XXXXXX\") || { echo \"cannot create a file in $dir\"; exit 1; }\n" +
-    "trap 'rm -f -- \"$tmp\"' EXIT\n" +
+    "case $target in /*) ;; *) target=$PWD/$target; dir=$(dirname -- \"$target\");; esac\n" +
+    "stage=$(mktemp -d -- \"$dir/.omarchy-stock-hq-export.XXXXXX\") || { echo \"cannot create a file in $dir\"; exit 1; }\n" +
+    "trap 'rmdir -- \"$stage\" 2>/dev/null' EXIT\n" +
+    "cd -P -- \"$stage\" || exit 1\n" +
+    "[ \"$(stat -c %u -- .)\" = \"$me\" ] && [ \"$(stat -c %a -- .)\" = 700 ] || { echo \"staging directory is not private\"; exit 1; }\n" +
+    "trap 'rm -f -- ./payload; rmdir -- \"$stage\" 2>/dev/null' EXIT\n" +
+    "tmp=./payload\n" +
+    ": > \"$tmp\" || exit 1\n" +
     "chmod 600 -- \"$tmp\" || { echo \"cannot make the export private (chmod 600 failed)\"; exit 1; }\n" +
     "private \"$tmp\" || { echo \"this folder cannot hold a private (0600) file\"; exit 1; }\n" +
     "head -c \"$2\" > \"$tmp\" && [ \"$(wc -c < \"$tmp\")\" -eq \"$2\" ] || { echo \"write failed\"; exit 1; }\n" +
-    "final=$target\n" +
+    "final=../$(basename -- \"$target\")\n" +
     "if [ -e \"$final\" ] || [ -L \"$final\" ]; then\n" +
-    "  mine \"$final\" || final=$(mktemp --suffix=.json -- \"$dir/$name-XXXXXX\") || { echo \"cannot create a new file name\"; exit 1; }\n" +
+    "  mine \"$final\" || final=$(mktemp --suffix=.json -- \"../$name-XXXXXX\") || { echo \"cannot create a new file name\"; exit 1; }\n" +
     "fi\n" +
     "mv -fT -- \"$tmp\" \"$final\" || { echo \"cannot write $final\"; exit 1; }\n" +
-    "trap - EXIT\n" +
     "private \"$final\" || { rm -f -- \"$final\"; echo \"export is not private, removed\"; exit 1; }\n" +
-    "printf '%s' \"$final\""
+    "printf '%s' \"$dir/${final#../}\""
 
 function exportCommand(target, text) {
   var body = String(text)
